@@ -999,6 +999,16 @@ def KrnlMemsetOp : Op<Krnl_Dialect, "memset", [MemRefsNormalizable,
   let assemblyFormat = [{ $dest `,` $value attr-dict `:` type($dest) }];
 }
 
+def KrnlStrncmpOp : Op<Krnl_Dialect, "strncmp", [NoSideEffect, MemRefsNormalizable]> {
+  let summary = "Perform string comparison up to N bytes.";
+  let description = [{
+    Krnl operation that performs a string comparison up to N bytes.
+  }];
+
+  let arguments = (ins I8MemRef:$str1, I8MemRef:$str2, I64: $numlen); 
+  let results = (outs I32:$res);    
+}
+
 def KrnlRandomNormalOp : Op<Krnl_Dialect, "random_normal",
     []> {
   let summary = "Generate a random normal tensor.";
@@ -1013,4 +1023,15 @@ def KrnlRandomNormalOp : Op<Krnl_Dialect, "random_normal",
     AnyFloat:$seed);
 
   let results = (outs );
+}
+
+def KrnlFindIndexOp : Op<Krnl_Dialect, "find_index",
+    [NoSideEffect, MemRefsNormalizable]> {
+  let summary = "Retrieve an index. (TODO better desc)";
+  let description = [{
+    Operation that Retrieve an index (TODO better desc).
+  }];
+
+  let arguments = (ins I8MemRef:$word, I32MemRef:$G, I32MemRef:$V);
+  let results = (outs I32:$index);    
 }

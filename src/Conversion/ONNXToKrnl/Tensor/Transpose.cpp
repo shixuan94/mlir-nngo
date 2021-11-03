@@ -14,8 +14,12 @@
 
 #include "src/Conversion/ONNXToKrnl/ONNXToKrnlCommon.hpp"
 #include "src/Dialect/ONNX/ShapeInference/ONNXShapeHelper.hpp"
+#include "llvm/Support/Debug.h"
 
 using namespace mlir;
+using llvm::dbgs;
+
+#define DEBUG_TYPE "transpose_onnx_to_krnl"
 
 struct ONNXTransposeOpLowering : public ConversionPattern {
   ONNXTransposeOpLowering(MLIRContext *ctx)
@@ -73,6 +77,12 @@ struct ONNXTransposeOpLowering : public ConversionPattern {
     }
 
     rewriter.replaceOp(op, alloc);
+
+    LLVM_DEBUG({
+      FuncOp function = getContainingFunction(op);
+      assert(function && "Could not find parent function");
+      dbgs() << "function: " << function << "\n";
+    });
 
     return success();
   }

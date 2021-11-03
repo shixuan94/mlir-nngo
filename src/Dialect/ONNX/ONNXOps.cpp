@@ -4424,7 +4424,7 @@ static LogicalResult verify(ONNXCategoryMapperOp op) {
     return success();
   }
 
-  ShapedType inputType = X.getType().dyn_cast<RankedTensorType>();
+  ShapedType inputType = X.getType().cast<ShapedType>();
   Type elementType = inputType.getElementType();
   if (!elementType.isInteger(64) && !elementType.isa<StringType>())
     return op.emitError("input must be a tensor of int64 or string");

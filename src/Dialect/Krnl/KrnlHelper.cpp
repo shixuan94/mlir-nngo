@@ -519,6 +519,14 @@ void KrnlBuilder::matmul(Value A, ValueRange aStart, Value B, ValueRange bStart,
       globalUBs[1], globalUBs[2], simdize, unroll, overcompute);
 }
 
+Value KrnlBuilder::constant(
+    MemRefType type, StringRef name, ArrayAttr value) const {
+  return b.create<KrnlGlobalOp>(loc, type, b.getI64ArrayAttr(type.getShape()),
+      name, value,
+      /*offset=*/nullptr,
+      /*alignment=*/nullptr);
+}
+
 bool isKrnlGlobalConstant(Value result) {
   Operation *op = result.getDefiningOp();
 

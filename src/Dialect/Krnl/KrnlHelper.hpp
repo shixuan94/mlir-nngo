@@ -357,6 +357,8 @@ struct KrnlBuilder : public DialectBuilder {
   void matmul(Value A, ValueRange aStart, Value B, ValueRange bStart, Value C,
       ValueRange cStart, ValueRange loops, ValueRange computeStarts,
       ValueRange globalUBs, bool simdize, bool unroll, bool overcompute);
+
+  Value constant(MemRefType type, StringRef name, ArrayAttr value) const;
 };
 
 //====---------------- Common helper functions --------------------------===//

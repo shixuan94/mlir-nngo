@@ -189,6 +189,8 @@ void FrontendToKrnlLoweringPass::runOnOperation() {
   populateLoweringONNXMatMulOpPattern(patterns, &getContext());
   populateLoweringONNXRandomNormalOpPattern(patterns, &getContext());
   populateLoweringONNXLRNOpPattern(patterns, &getContext());
+  // ML
+  populateLoweringONNXCategoryMapperOpPattern(patterns, &getContext());
   // ObjectDetection
   populateLoweringONNXNonMaxSuppressionOpPattern(patterns, &getContext());
   // Tensor

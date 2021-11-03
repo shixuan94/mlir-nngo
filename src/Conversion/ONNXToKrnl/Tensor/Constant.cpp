@@ -13,10 +13,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "src/Conversion/ONNXToKrnl/ONNXToKrnlCommon.hpp"
+#include "llvm/Support/Debug.h"
 
 using namespace mlir;
+using llvm::dbgs;
 
-bool checkOpResultIsReturned(ONNXConstantOp *constantOp) {
+#define DEBUG_TYPE "constant_onnx_to_krnl"
+
+static bool checkOpResultIsReturned(ONNXConstantOp *constantOp) {
   FuncOp function = getContainingFunction(constantOp->getOperation());
 
   bool opIsReturned = false;
@@ -34,14 +38,13 @@ struct ONNXConstantOpLowering : public ConversionPattern {
   static int constantID;
 
   ONNXConstantOpLowering(MLIRContext *ctx)
-      : ConversionPattern(mlir::ONNXConstantOp::getOperationName(), 1, ctx) {
-    constantID = 0;
-  }
+      : ConversionPattern(mlir::ONNXConstantOp::getOperationName(), 1, ctx) {}
 
   LogicalResult matchAndRewrite(Operation *op, ArrayRef<Value> operands,
       ConversionPatternRewriter &rewriter) const final {
     auto loc = ONNXLoc<ONNXConstantOp>(op);
     auto constantOp = llvm::dyn_cast<ONNXConstantOp>(op);
+    assert(constantOp && "Op does not have type ONNXConstantOp");
 
     if (constantOp.sparse_value().hasValue())
       return emitError(loc, "Only support dense values at this time");
@@ -97,7 +100,7 @@ struct ONNXConstantOpLowering : public ConversionPattern {
   }
 };
 
-int ONNXConstantOpLowering::constantID;
+int ONNXConstantOpLowering::constantID = 0;
 
 void populateLoweringONNXConstantOpPattern(
     RewritePatternSet &patterns, MLIRContext *ctx) {

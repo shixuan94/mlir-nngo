@@ -238,7 +238,6 @@ struct TensorTypeConverter : public TypeConverter {
 //===----------------------------------------------------------------------===//
 
 // `ControlFlow` directory methods:
-
 void populateLoweringONNXLoopOpPattern(
     RewritePatternSet &patterns, MLIRContext *ctx);
 
@@ -246,7 +245,6 @@ void populateLoweringONNXScanOpPattern(
     RewritePatternSet &patterns, MLIRContext *ctx);
 
 // `Math` directory methods:
-
 void populateLoweringONNXClipOpPattern(
     RewritePatternSet &patterns, MLIRContext *ctx);
 
@@ -280,8 +278,11 @@ void populateLoweringONNXSoftmaxOpPattern(
 void populateLoweringONNXTopKOpPattern(
     RewritePatternSet &patterns, MLIRContext *ctx);
 
-// `NN` directory methods:
+// `ML` directory methods:
+void populateLoweringONNXCategoryMapperOpPattern(
+    RewritePatternSet &patterns, MLIRContext *ctx);
 
+// `NN` directory methods:
 void populateLoweringONNXConvOpPattern(
     RewritePatternSet &patterns, MLIRContext *ctx);
 
