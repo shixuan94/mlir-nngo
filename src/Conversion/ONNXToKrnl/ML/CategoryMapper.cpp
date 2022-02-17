@@ -1,4 +1,4 @@
-*
+/*
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -145,7 +145,7 @@ struct ONNXCategoryMapperOpLowering : public ConversionPattern {
     LLVM_DEBUG({
       FuncOp function = getContainingFunction(op);
       assert(function && "Could not find parent function");
-      dbgs() << "function:\n" << function << "\n";
+      dbgs() << "function: " << function << "\n";
     });
 
     return success();
