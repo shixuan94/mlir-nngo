@@ -609,7 +609,7 @@ JNIEXPORT jobject JNICALL Java_com_ibm_onnxmlir_OMModel_main_1graph_1jni(
 }
 
 JNIEXPORT jstring JNICALL Java_com_ibm_onnxmlir_OMModel_input_1signature_1jni(
-    JNIEnv *env, jclass cls) {
+    JNIEnv *env, jclass cls, jstring entry_point) {
 
   assert(env);
   log_init();
@@ -620,8 +620,8 @@ JNIEXPORT jstring JNICALL Java_com_ibm_onnxmlir_OMModel_input_1signature_1jni(
       "Class java/lang/Exception not found");
 
   /* Call model input signature API */
-  CHECK_CALL(const char *, jni_isig, omInputSignature(), jni_isig != NULL,
-      "jni_isig=%p", jni_isig);
+  CHECK_CALL(const char *, jni_isig, omInputSignature(entry_point),
+      jni_isig != NULL, "jni_isig=%p", jni_isig);
   HEX_DEBUG("isig", jni_isig, strlen(jni_isig));
 
   /* Convert to Java String object */
@@ -633,7 +633,7 @@ JNIEXPORT jstring JNICALL Java_com_ibm_onnxmlir_OMModel_input_1signature_1jni(
 }
 
 JNIEXPORT jstring JNICALL Java_com_ibm_onnxmlir_OMModel_output_1signature_1jni(
-    JNIEnv *env, jclass cls) {
+    JNIEnv *env, jclass cls, jstring entry_point) {
 
   assert(env);
   log_init();
@@ -644,8 +644,8 @@ JNIEXPORT jstring JNICALL Java_com_ibm_onnxmlir_OMModel_output_1signature_1jni(
       "Class java/lang/Exception not found");
 
   /* Call model output signature API */
-  CHECK_CALL(const char *, jni_osig, omOutputSignature(), jni_osig != NULL,
-      "jni_osig=%p", jni_osig);
+  CHECK_CALL(const char *, jni_osig, omOutputSignature(entry_point),
+      jni_osig != NULL, "jni_osig=%p", jni_osig);
   HEX_DEBUG("osig", jni_osig, strlen(jni_osig));
 
   /* Convert to Java String object */

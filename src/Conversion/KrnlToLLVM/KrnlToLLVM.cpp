@@ -15,12 +15,13 @@
 #include "mlir/Analysis/DataLayoutAnalysis.h"
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Conversion/ArithmeticToLLVM/ArithmeticToLLVM.h"
+#include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
 #include "mlir/Conversion/LLVMCommon/Pattern.h"
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/MathToLLVM/MathToLLVM.h"
 #include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
-#include "mlir/Conversion/SCFToStandard/SCFToStandard.h"
+#include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Conversion/ShapeToStandard/ShapeToStandard.h"
 #include "mlir/Conversion/VectorToLLVM/ConvertVectorToLLVM.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
@@ -43,7 +44,11 @@
 
 #include "onnx/onnx_pb.h"
 
+#include "src/Conversion/KrnlToLLVM/KrnlPrint.hpp"
+#include "src/Conversion/KrnlToLLVM/KrnlPrintTensor.hpp"
 #include "src/Conversion/KrnlToLLVM/KrnlToLLVM.hpp"
+#include "src/Conversion/KrnlToLLVM/KrnlToLLVMHelper.hpp"
+#include "src/Conversion/KrnlToLLVM/RuntimeAPI.hpp"
 #include "src/Conversion/ONNXToKrnl/ONNXToKrnlCommon.hpp"
 #include "src/Dialect/Krnl/KrnlOps.hpp"
 #include "src/Pass/Passes.hpp"
@@ -51,96 +56,11 @@
 
 #define DEBUG_TYPE "krnl_to_llvm"
 
+const std::string DEFAULT_DYN_ENTRY_POINT = "run_main_graph";
+
 using namespace mlir;
+
 namespace {
-
-// Convert an MLIR  type to the correspoding ONNX type.
-static onnx::TensorProto::DataType mlirTypeToOnnxType(mlir::Type elemType) {
-  onnx::TensorProto::DataType onnxType = onnx::TensorProto::UNDEFINED;
-
-  TypeSwitch<mlir::Type>(elemType)
-      .Case<mlir::BFloat16Type>(
-          [&](mlir::BFloat16Type) { onnxType = onnx::TensorProto::BFLOAT16; })
-      .Case<mlir::ComplexType>([&](mlir::ComplexType type) {
-        if (type.getElementType().isa<mlir::Float32Type>())
-          onnxType = onnx::TensorProto::COMPLEX64;
-        else if (type.getElementType().isa<mlir::Float64Type>())
-          onnxType = onnx::TensorProto::COMPLEX128;
-      })
-      .Case<mlir::Float16Type>(
-          [&](mlir::Float16Type) { onnxType = onnx::TensorProto::FLOAT16; })
-      .Case<mlir::Float32Type>(
-          [&](mlir::Float32Type) { onnxType = onnx::TensorProto::FLOAT; })
-      .Case<mlir::Float64Type>(
-          [&](mlir::Float64Type) { onnxType = onnx::TensorProto::DOUBLE; })
-      .Case<mlir::IntegerType>([&](mlir::IntegerType type) {
-        switch (type.getWidth()) {
-        case 1:
-          // only a signless type can be a bool.
-          onnxType = (type.isSigned() || type.isUnsigned())
-                         ? onnx::TensorProto::UNDEFINED
-                         : onnx::TensorProto::BOOL;
-          break;
-        case 8:
-          onnxType = type.isUnsigned() ? onnx::TensorProto::UINT8
-                                       : onnx::TensorProto::INT8;
-          break;
-        case 16:
-          onnxType = type.isUnsigned() ? onnx::TensorProto::UINT16
-                                       : onnx::TensorProto::INT16;
-          break;
-        case 32:
-          onnxType = type.isUnsigned() ? onnx::TensorProto::UINT32
-                                       : onnx::TensorProto::INT32;
-          break;
-        case 64:
-          onnxType = type.isUnsigned() ? onnx::TensorProto::UINT64
-                                       : onnx::TensorProto::INT64;
-          break;
-        }
-      })
-      .Case<mlir::StringType>(
-          [&](mlir::StringType) { onnxType = onnx::TensorProto::STRING; });
-
-  if (onnxType == onnx::TensorProto::UNDEFINED) {
-    elemType.dump();
-    llvm_unreachable("MLIR type cannot be converted to ONNX type");
-  }
-
-  return onnxType;
-}
-
-static FlatSymbolRefAttr getOrInsertExternFunc(StringRef funcName,
-    ModuleOp module, mlir::Type funcType, PatternRewriter &rewriter) {
-  auto *context = module.getContext();
-  if (auto sym = module.lookupSymbol<LLVM::LLVMFuncOp>(funcName)) {
-    assert(sym.getType() == funcType && "wrong symbol type");
-    return SymbolRefAttr::get(context, funcName);
-  }
-
-  // Insert the function into the body of the parent module.
-  PatternRewriter::InsertionGuard insertGuard(rewriter);
-  rewriter.setInsertionPointToStart(module.getBody());
-  rewriter.create<LLVM::LLVMFuncOp>(module.getLoc(), funcName, funcType);
-  return SymbolRefAttr::get(context, funcName);
-}
-
-static int64_t getRankFromMemRefType(LLVM::LLVMStructType memRefTy) {
-  // Usually a MemRef is a 5-element struct, where the 4th and 5th elements in
-  // this struct are arrays whose size is the rank of the tensor. In the event
-  // that the corresponding tensor of this MemRef is a scalar, the 4th and 5th
-  // elements will have 0-length, which in turn causes the MemRef struct to
-  // degenerate into a 3-element struct. For more information, refer to
-  // https://github.com/llvm/llvm-project/blob/main/mlir/docs/ConversionToLLVMDialect.md#memref-types.
-  auto numElems = memRefTy.getBody().size();
-  assert((numElems == 3 || numElems == 5) &&
-         "Expect MemRef type to contain either 3 or 5 elements.");
-
-  if (numElems == 3)
-    return 0; // MemRef refers to a scalar.
-  else
-    return memRefTy.getBody()[3].cast<LLVM::LLVMArrayType>().getNumElements();
-}
 
 // Create a function declaration for OMInstrumentPoint, the signature is:
 //   `void (i64, i64)`
@@ -293,6 +213,31 @@ static FlatSymbolRefAttr getOrInsertUnaryMathFunction(PatternRewriter &rewriter,
   rewriter.setInsertionPointToStart(module.getBody());
   rewriter.create<LLVM::LLVMFuncOp>(module.getLoc(), mathFuncName, llvmFnType);
   return SymbolRefAttr::get(context, mathFuncName);
+}
+
+/// Return a symbol reference to the strncmp function, inserting it into the
+/// module if necessary.
+static FlatSymbolRefAttr getOrInsertStrncmp(
+    OpBuilder &rewriter, ModuleOp module) {
+  constexpr const char *funcName = "strncmp";
+  Optional<FlatSymbolRefAttr> optFuncDecl =
+      getFunctionDeclaration(module, funcName);
+  if (optFuncDecl.hasValue())
+    return optFuncDecl.getValue();
+
+  // Create 'strncmp' function signature: `i32 (i8*, i8*, i64)`
+  MLIRContext *ctx = module.getContext();
+  Type i8Type = IntegerType::get(ctx, 8);
+  Type i8PtrTy = LLVM::LLVMPointerType::get(i8Type);
+  Type fnType = LLVM::LLVMFunctionType::get(rewriter.getI32Type(),
+      ArrayRef<Type>({i8PtrTy, i8PtrTy, rewriter.getI64Type()}), false);
+
+  // Insert the function declaration the module.
+  PatternRewriter::InsertionGuard insertGuard(rewriter);
+  rewriter.setInsertionPointToStart(module.getBody());
+  rewriter.create<LLVM::LLVMFuncOp>(module.getLoc(), funcName, fnType);
+
+  return SymbolRefAttr::get(ctx, funcName);
 }
 
 //===----------------------------------------------------------------------===//
@@ -469,8 +414,9 @@ public:
 
     // Set the global alignment based on the alignment attribute if it exists,
     // otherwise use the module datalayout info.
-    setAlignment(global, krnlGlobalOp.alignmentAttr(),
-        krnlGlobalOp->getParentOfType<ModuleOp>(), rewriter);
+    onnx_mlir::setAlignment(global, krnlGlobalOp.alignmentAttr(),
+        krnlGlobalOp->getParentOfType<ModuleOp>(), rewriter,
+        *getTypeConverter());
 
     // Prepare data to be inserted into a MemRefDescriptor (a struct).
     Value globalOpAddr =
@@ -566,25 +512,6 @@ private:
     return global;
   }
 
-  // If the operation has a valid alignment attribute use it, otherwise
-  // attempt to set the alignment based on the module datalayout (if it
-  // exists).
-  void setAlignment(LLVM::GlobalOp &global, IntegerAttr alignmentAttr,
-      ModuleOp module, OpBuilder &builder) const {
-    if (alignmentAttr && alignmentAttr.getValue().getSExtValue() != 0)
-      global.setAlignmentAttr(alignmentAttr);
-    else if (module->getAttr(LLVM::LLVMDialect::getDataLayoutAttrName())) {
-      // TODO: use MLIR data layout when it becomes available.
-      llvm::LLVMContext llvmContext;
-      int32_t align = LLVM::TypeToLLVMIRTranslator(llvmContext)
-                          .getPreferredAlignment(global.getType(),
-                              getTypeConverter()->getDataLayout());
-      align = std::max(align, MinGlobalAlign);
-      global.setAlignmentAttr(builder.getI64IntegerAttr(align));
-    } else
-      global.setAlignmentAttr(builder.getI64IntegerAttr(MinGlobalAlign));
-  }
-
   int64_t computeSizeInBytes(KrnlGlobalOp &krnlGlobalOp) const {
     // Compute total number of elements.
     const auto shape = (krnlGlobalOp.shape()).dyn_cast<ArrayAttr>();
@@ -632,22 +559,16 @@ private:
     int64_t numStrings = denseAttr.getValues<StringRef>().size();
     if (numStrings == 1) {
       StringRef str = *denseAttr.getValues<StringRef>().begin();
-      LLVM::GlobalOp global =
-          getOrCreateGlobalString(str, loc, builder, module);
-
-      //      return builder.create<LLVM::GlobalOp>(loc, globalType,
-      //        /*isConstant=*/true, LLVM::Linkage::Internal,
-      //        krnlGlobalOp.name(),
-      //      StringAttr::get(builder.getContext(), str));
-      return global;
+      return onnx_mlir::getOrCreateGlobalString(
+          str, loc, builder, module, getTypeConverter());
     }
 
     // Generate LLVM GlobalOps for each string in the KrnlGlobalOp dense
     // attribute.
     SmallVector<LLVM::GlobalOp> globalOps;
     for (StringRef str : denseAttr.getValues<StringRef>()) {
-      LLVM::GlobalOp globalOp =
-          getOrCreateGlobalString(str, loc, builder, module);
+      LLVM::GlobalOp globalOp = onnx_mlir::getOrCreateGlobalString(
+          str, loc, builder, module, getTypeConverter());
       globalOps.push_back(globalOp);
     }
 
@@ -667,7 +588,7 @@ private:
     int32_t index = 0;
     Value lastValue = array;
     for (const LLVM::GlobalOp &globalOp : globalOps) {
-      LLVM::GEPOp strAddr = getPtrToGlobalString(globalOp, loc, builder);
+      Value strAddr = onnx_mlir::getPtrToGlobalString(globalOp, loc, builder);
       lastValue = builder.create<LLVM::InsertValueOp>(loc, arrayType, lastValue,
           strAddr, builder.getArrayAttr({builder.getIndexAttr(index++)}));
     }
@@ -675,42 +596,6 @@ private:
     builder.create<LLVM::ReturnOp>(loc, ArrayRef<Value>({lastValue}));
     return global;
   }
-
-  // Return the GlobalOp for the given string, creating one if not found.
-  LLVM::GlobalOp getOrCreateGlobalString(
-      StringRef str, Location loc, OpBuilder &builder, ModuleOp module) const {
-    LLVM::GlobalOp global = module.lookupSymbol<LLVM::GlobalOp>(str);
-    if (!global) {
-      // Create the global at the entry of the module.
-      OpBuilder::InsertionGuard insertGuard(builder);
-      builder.setInsertionPointToStart(module.getBody());
-
-      Type i8Type = IntegerType::get(builder.getContext(), 8);
-      Type type = LLVM::LLVMArrayType::get(i8Type, str.size());
-      global = builder.create<LLVM::GlobalOp>(loc, type, /*isConstant=*/true,
-          LLVM::Linkage::Internal, str, builder.getStringAttr(str));
-
-      setAlignment(global, nullptr, module, builder);
-    }
-    return global;
-  }
-
-  // Return a pointer to the first character in a global string.
-  LLVM::GEPOp getPtrToGlobalString(
-      const LLVM::GlobalOp &global, Location loc, OpBuilder &builder) const {
-    Type i8Type = IntegerType::get(builder.getContext(), 8);
-    Type i8PtrType = LLVM::LLVMPointerType::get(i8Type);
-    Type llvmIndexType =
-        getTypeConverter()->convertType(builder.getIndexType());
-
-    Value globalPtr = builder.create<LLVM::AddressOfOp>(loc, global);
-    Value zero = builder.create<LLVM::ConstantOp>(
-        loc, llvmIndexType, builder.getIndexAttr(0));
-    return builder.create<LLVM::GEPOp>(
-        loc, i8PtrType, globalPtr, ArrayRef<Value>({zero, zero}));
-  }
-
-  const int32_t MinGlobalAlign = 16;
 };
 
 class KrnlInstrumentOpLowering : public ConversionPattern {
@@ -727,13 +612,6 @@ public:
 
     // Get a symbol reference to the memcpy function, inserting it if necessary.
     ModuleOp parentModule = op->getParentOfType<ModuleOp>();
-    // auto llvmVoidTy = LLVM::LLVMVoidType::get(context);
-    // auto llvmI8PtrTy = LLVM::LLVMPointerType::get(IntegerType::get(context,
-    // 8));
-    // auto llvmI64Ty = IntegerType::get(context, 64); auto llvmFnType =
-    // LLVM::LLVMFunctionType::get(
-    //    llvmVoidTy, ArrayRef<mlir::Type>({llvmI64Ty, llvmI64Ty}), false);
-
     auto instrumentRef = getOrInsertInstrument(rewriter, parentModule);
 
     Value nodeName =
@@ -744,9 +622,6 @@ public:
         rewriter.create<LLVM::ConstantOp>(loc, IntegerType::get(context, 64),
             rewriter.getIntegerAttr(
                 rewriter.getIntegerType(64), instrumentOp.tag()));
-    // StringRef txt = instrumentOp->op_name();
-    // Value nodeName = rewriter.create<LLVM::ConstantOp>(loc, llvmI8PtrTy,
-    // instrumentOp->op_name());
 
     rewriter.create<CallOp>(loc, instrumentRef, ArrayRef<Type>({}),
         ArrayRef<Value>({nodeName, tag}));
@@ -920,32 +795,6 @@ public:
     rewriter.replaceOp(op, funcCall.getResults()[0]);
     return success();
   }
-
-private:
-  /// Return a symbol reference to the strncmp function, inserting it into the
-  /// module if necessary.
-  static FlatSymbolRefAttr getOrInsertStrncmp(
-      PatternRewriter &rewriter, ModuleOp module) {
-    constexpr const char *funcName = "strncmp";
-    Optional<FlatSymbolRefAttr> optFuncDecl =
-        getFunctionDeclaration(module, funcName);
-    if (optFuncDecl.hasValue())
-      return optFuncDecl.getValue();
-
-    // Create 'strncmp' function signature: `i32 (i8*, i8*, i64)`
-    MLIRContext *ctx = module.getContext();
-    Type i8Type = IntegerType::get(ctx, 8);
-    Type i8PtrTy = LLVM::LLVMPointerType::get(i8Type);
-    Type fnType = LLVM::LLVMFunctionType::get(rewriter.getI32Type(),
-        ArrayRef<Type>({i8PtrTy, i8PtrTy, rewriter.getI64Type()}), false);
-
-    // Insert the function declaration the module.
-    PatternRewriter::InsertionGuard insertGuard(rewriter);
-    rewriter.setInsertionPointToStart(module.getBody());
-    rewriter.create<LLVM::LLVMFuncOp>(module.getLoc(), funcName, fnType);
-
-    return SymbolRefAttr::get(ctx, funcName);
-  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -1087,63 +936,12 @@ class KrnlEntryPointOpLowering : public OpRewritePattern<KrnlEntryPointOp> {
 public:
   using OpRewritePattern<KrnlEntryPointOp>::OpRewritePattern;
   ArrayRef<bool> constantOutputs;
+  bool singleEntryPoint;
 
-  KrnlEntryPointOpLowering(MLIRContext *ctx, ArrayRef<bool> constantOutputs)
+  KrnlEntryPointOpLowering(
+      MLIRContext *ctx, ArrayRef<bool> constantOutputs, bool singleEntryPoint)
       : OpRewritePattern<KrnlEntryPointOp>(ctx),
-        constantOutputs(constantOutputs) {}
-
-  enum class API {
-    CREATE_OMTENSOR_LIST,
-    CREATE_OMTENSOR,
-    GET_DATA,
-    SET_DATA,
-    GET_DATA_SHAPE,
-    GET_DATA_STRIDES,
-    SET_DATA_TYPE,
-    GET_DATA_TYPE,
-    GET_OMT_ARRAY,
-  };
-
-  struct ApiSpec {
-    API id;
-    std::string name;
-    FlatSymbolRefAttr symbolRef;
-    Type outputTy;
-    SmallVector<Type, 4> inputTys;
-
-    ApiSpec(
-        API id, const std::string &name, Type outputTy, ArrayRef<Type> inputTys)
-        : id(id), name(name), outputTy(outputTy),
-          inputTys(inputTys.begin(), inputTys.end()) {}
-
-    Type funcTy() {
-      return LLVM::LLVMFunctionType::get(outputTy, inputTys,
-          /*isVarArg=*/false);
-    }
-  };
-
-  static void genSignatureFunction(PatternRewriter &rewriter,
-      MLIRContext *context, std::string funcName, LLVM::GlobalOp sigvar,
-      Location loc) {
-    auto opaquePtrTy = LLVM::LLVMPointerType::get(IntegerType::get(context, 8));
-    llvm::SmallVector<Type, 1> outputsType{opaquePtrTy};
-
-    auto funcType = rewriter.getFunctionType(llvm::None, outputsType);
-    llvm::SmallVector<NamedAttribute, 1> attrs;
-    auto funcOp = rewriter.create<FuncOp>(
-        UnknownLoc::get(context), funcName, funcType, attrs);
-
-    auto entryBlock = funcOp.addEntryBlock();
-
-    OpBuilder::InsertionGuard guard(rewriter);
-    rewriter.setInsertionPointToStart(entryBlock);
-
-    auto sigAddr = rewriter.create<LLVM::AddressOfOp>(loc, sigvar);
-    auto sigVoidPtr =
-        rewriter.create<LLVM::BitcastOp>(loc, opaquePtrTy, sigAddr);
-    llvm::SmallVector<Value, 1> results = {sigVoidPtr};
-    rewriter.create<ReturnOp>(UnknownLoc::get(context), results);
-  }
+        constantOutputs(constantOutputs), singleEntryPoint(singleEntryPoint) {}
 
   LogicalResult matchAndRewrite(
       KrnlEntryPointOp op, PatternRewriter &rewriter) const override {
@@ -1155,33 +953,9 @@ public:
     auto numOutputs = op->getAttrOfType<IntegerAttr>(
                             KrnlEntryPointOp::getNumOutputsAttrName())
                           .getInt();
-    auto sigAttr =
-        op->getAttrOfType<StringAttr>(KrnlEntryPointOp::getSignatureAttrName());
-    auto signature = sigAttr.getValue();
 
     auto opaquePtrTy = LLVM::LLVMPointerType::get(IntegerType::get(context, 8));
     auto int64Ty = IntegerType::get(context, 64);
-
-    // create global to hold signature
-    auto splitSig = signature.split('@');
-    llvm::StringRef inSig = splitSig.first;
-    llvm::StringRef outSig = splitSig.second;
-    mlir::StringAttr inSigAttr = mlir::StringAttr::get(context, inSig);
-    mlir::StringAttr outSigAttr = mlir::StringAttr::get(context, outSig);
-
-    auto inSigArrayType =
-        LLVM::LLVMArrayType::get(IntegerType::get(context, 8), inSig.size());
-    auto insig = rewriter.create<LLVM::GlobalOp>(loc, inSigArrayType,
-        /*isConstant=*/true, LLVM::Linkage::External, "_in_signature",
-        inSigAttr);
-
-    auto outSigArrayType =
-        LLVM::LLVMArrayType::get(IntegerType::get(context, 8), outSig.size());
-    auto outsig = rewriter.create<LLVM::GlobalOp>(loc, outSigArrayType,
-        /*isConstant=*/true, LLVM::Linkage::External, "_out_signature",
-        outSigAttr);
-    genSignatureFunction(rewriter, context, "omInputSignature", insig, loc);
-    genSignatureFunction(rewriter, context, "omOutputSignature", outsig, loc);
 
     // Rewrite Krnl Entry Point Operation to an LLVM function with a dynamic
     // signature. The signature is dynamic because it remains the same no matter
@@ -1195,19 +969,16 @@ public:
               KrnlEntryPointOp::getEntryPointFuncAttrName())
             .getLeafReference()
             .getValue();
-
     // When there is only a single entry point function in a model, use
-    // "run_main_graph" as the default name.
-    // TODO(tung): support multiple entry point functions.
-    std::string entryPointName = "run_main_graph";
-    assert(module.lookupSymbol(entryPointName) == nullptr &&
-           "Only support a single entry point function.");
-
+    // DEFAULT_DYN_ENTRY_POINT.
+    std::string dynEntryPointName = "run_" + staticEntryPointFuncName.str();
+    if (singleEntryPoint)
+      dynEntryPointName = DEFAULT_DYN_ENTRY_POINT;
     rewriter.eraseOp(op);
     auto dynEntryPointFuncTy =
         LLVM::LLVMFunctionType::get(opaquePtrTy, {opaquePtrTy}, false);
     auto dynamicEntryPointFunc = rewriter.create<LLVM::LLVMFuncOp>(
-        loc, entryPointName, dynEntryPointFuncTy);
+        loc, dynEntryPointName, dynEntryPointFuncTy);
     auto &entryPointEntryBlock =
         createEntryBlock(dynEntryPointFuncTy, dynamicEntryPointFunc, loc);
     rewriter.setInsertionPointToStart(&entryPointEntryBlock);
@@ -1329,16 +1100,16 @@ public:
 
       auto memRef = outMemRefList.at(i);
       auto outMemRefTy = memRef.getType().dyn_cast<LLVM::LLVMStructType>();
-      auto outMemRefRank = getRankFromMemRefType(outMemRefTy);
+      auto outMemRefRank = onnx_mlir::getRankFromMemRefType(outMemRefTy);
       auto outMemRefRankVal = rewriter.create<LLVM::ConstantOp>(
           loc, int64Ty, rewriter.getI64IntegerAttr(outMemRefRank));
       Value outOMTensor = callApi(
           rewriter, loc, apiRegistry, API::CREATE_OMTENSOR, {outMemRefRankVal});
       // If output is a constant tensor, OMTensor does not own it.
-      auto outOwning = constantOutputs[i] ? 0 : 1;
+      bool outOwning = constantOutputs[i] ? false : true;
       LLVM_DEBUG(llvm::dbgs() << "Output OMTensor " << i
                               << " with owning = " << outOwning << "\n");
-      fillOMTensorWithMemRef(
+      onnx_mlir::fillOMTensorWithMemRef(
           memRef, outOMTensor, outOwning, rewriter, loc, apiRegistry, module);
 
       auto idxVal = rewriter.create<LLVM::ConstantOp>(
@@ -1471,11 +1242,12 @@ private:
         rewriter.getArrayAttr({rewriter.getI64IntegerAttr(2)}));
 
     // Get rank, sizes array ptr and strides array ptr.
-    auto rank = getRankFromMemRefType(memRefTy.cast<LLVM::LLVMStructType>());
-    Value sizesArrayPtr =
-        callApi(rewriter, loc, apiRegistry, API::GET_DATA_SHAPE, {rtMemRef});
-    Value stridesArrayPtr =
-        callApi(rewriter, loc, apiRegistry, API::GET_DATA_STRIDES, {rtMemRef});
+    auto rank =
+        onnx_mlir::getRankFromMemRefType(memRefTy.cast<LLVM::LLVMStructType>());
+    Value sizesArrayPtr = RuntimeAPI::callApi(rewriter, loc, apiRegistry,
+        RuntimeAPI::API::GET_DATA_SHAPE, {rtMemRef});
+    Value stridesArrayPtr = RuntimeAPI::callApi(rewriter, loc, apiRegistry,
+        RuntimeAPI::API::GET_DATA_STRIDES, {rtMemRef});
 
     for (decltype(rank) i = 0; i < rank; i++) {
       auto dimIdx = rewriter.create<LLVM::ConstantOp>(
@@ -1504,84 +1276,6 @@ private:
     }
 
     rewriter.create<LLVM::StoreOp>(loc, memRef, ptrToMemRef);
-  }
-
-  void fillOMTensorWithMemRef(Value &outMemRef, Value &outOMTensor,
-      int64_t outOwning, PatternRewriter &rewriter, const Location &loc,
-      const std::map<API, ApiSpec> &apiRegistry, ModuleOp &module) const {
-    auto *context = module.getContext();
-    auto outMemRefTy = outMemRef.getType().dyn_cast<LLVM::LLVMStructType>();
-    auto int64Ty = IntegerType::get(context, 64);
-
-    // Set ownership, i.e., free after OMTensor is destroyed.
-    Value owning = rewriter.create<LLVM::ConstantOp>(
-        loc, int64Ty, rewriter.getI64IntegerAttr(outOwning));
-
-    // Extract the allocated pointer.
-    Value outMemRefAllocatedPtr =
-        rewriter.create<LLVM::ExtractValueOp>(loc, outMemRefTy.getBody()[0],
-            outMemRef, rewriter.getArrayAttr({rewriter.getI64IntegerAttr(0)}));
-    outMemRefAllocatedPtr = rewriter.create<LLVM::BitcastOp>(loc,
-        LLVM::LLVMPointerType::get(IntegerType::get(context, 8)),
-        outMemRefAllocatedPtr);
-
-    // Extract the aligned pointer.
-    Value outMemRefAlignedPtr =
-        rewriter.create<LLVM::ExtractValueOp>(loc, outMemRefTy.getBody()[1],
-            outMemRef, rewriter.getArrayAttr({rewriter.getI64IntegerAttr(1)}));
-    outMemRefAlignedPtr = rewriter.create<LLVM::BitcastOp>(loc,
-        LLVM::LLVMPointerType::get(IntegerType::get(context, 8)),
-        outMemRefAlignedPtr);
-
-    // Set ownership, allocated and aligned pointer.
-    callApi(rewriter, loc, apiRegistry, API::SET_DATA,
-        {outOMTensor, owning, outMemRefAllocatedPtr, outMemRefAlignedPtr});
-
-    Type elemTy =
-        outMemRefTy.getBody()[0].cast<LLVM::LLVMPointerType>().getElementType();
-
-    if (auto structType = elemTy.dyn_cast_or_null<LLVM::LLVMStructType>()) {
-      elemTy = structType.getBody()[0]
-                   .cast<LLVM::LLVMPointerType>()
-                   .getElementType();
-    }
-
-    onnx::TensorProto::DataType onnxTy = mlirTypeToOnnxType(elemTy);
-    auto onnxTyVal = rewriter.create<LLVM::ConstantOp>(
-        loc, int64Ty, rewriter.getI64IntegerAttr(onnxTy));
-    callApi(rewriter, loc, apiRegistry, API::SET_DATA_TYPE,
-        {outOMTensor, onnxTyVal});
-
-    int64_t rank = getRankFromMemRefType(outMemRefTy);
-    Value sizesArrayPtr =
-        callApi(rewriter, loc, apiRegistry, API::GET_DATA_SHAPE, {outOMTensor});
-    Value stridesArrayPtr = callApi(
-        rewriter, loc, apiRegistry, API::GET_DATA_STRIDES, {outOMTensor});
-
-    for (decltype(rank) i = 0; i < rank; i++) {
-      auto dimIdx = rewriter.create<LLVM::ConstantOp>(
-          loc, int64Ty, rewriter.getI64IntegerAttr(i));
-
-      // Transfer size of dimension from memref to dynamic memref.
-      auto dimSize = rewriter.create<LLVM::ExtractValueOp>(loc, int64Ty,
-          outMemRef,
-          rewriter.getArrayAttr(
-              {rewriter.getI64IntegerAttr(3), rewriter.getI64IntegerAttr(i)}));
-      auto dimSizePtr =
-          rewriter.create<LLVM::GEPOp>(loc, LLVM::LLVMPointerType::get(int64Ty),
-              sizesArrayPtr, ArrayRef<Value>({dimIdx}));
-      rewriter.create<LLVM::StoreOp>(loc, dimSize, dimSizePtr);
-
-      // Transfer stride of dimension from memref to dynamic memref.
-      auto dimStride = rewriter.create<LLVM::ExtractValueOp>(loc, int64Ty,
-          outMemRef,
-          rewriter.getArrayAttr(
-              {rewriter.getI64IntegerAttr(4), rewriter.getI64IntegerAttr(i)}));
-      auto dimStridePtr =
-          rewriter.create<LLVM::GEPOp>(loc, LLVM::LLVMPointerType::get(int64Ty),
-              stridesArrayPtr, ArrayRef<Value>({dimIdx}));
-      rewriter.create<LLVM::StoreOp>(loc, dimStride, dimStridePtr);
-    }
   }
 };
 
@@ -1870,7 +1564,7 @@ private:
 
 void mlir::populateAffineAndKrnlToLLVMConversion(RewritePatternSet &patterns,
     MLIRContext *ctx, LLVMTypeConverter &typeConverter,
-    ArrayRef<bool> constantOutputs) {
+    ArrayRef<bool> constantOutputs, bool singleEntryPoint) {
   // TODO: look at what is done in
   // mlir/lib/Conversion/VectorToLLVM/ConvertVectorToLLVMPass.cpp in function
   // LowerVectorToLLVMPass::runOnOperation() and see what we should do about it.
@@ -1884,7 +1578,7 @@ void mlir::populateAffineAndKrnlToLLVMConversion(RewritePatternSet &patterns,
   vector::populateVectorTransposeLoweringPatterns(patterns);
 
   populateAffineToStdConversionPatterns(patterns);
-  populateLoopToStdConversionPatterns(patterns);
+  populateSCFToControlFlowConversionPatterns(patterns);
 
   populateShapeToStandardConversionPatterns(patterns);
   populateVectorToLLVMMatrixConversionPatterns(typeConverter, patterns);
@@ -1899,17 +1593,22 @@ void mlir::populateAffineAndKrnlToLLVMConversion(RewritePatternSet &patterns,
   populateStdToLLVMConversionPatterns(typeConverter, patterns);
   populateMemRefToLLVMConversionPatterns(typeConverter, patterns);
   arith::populateArithmeticToLLVMConversionPatterns(typeConverter, patterns);
+  cf::populateControlFlowToLLVMConversionPatterns(typeConverter, patterns);
+
   populateReconcileUnrealizedCastsPatterns(patterns);
 
   patterns.insert<KrnlGlobalOpLowering, KrnlVectorTypeCastOpLowering>(
       ctx, typeConverter);
   patterns.insert<KrnlGetRefOpLowering>(ctx, typeConverter);
-  patterns.insert<KrnlEntryPointOpLowering>(ctx, constantOutputs);
+  patterns.insert<KrnlEntryPointOpLowering>(
+      ctx, constantOutputs, singleEntryPoint);
 
   patterns.insert<KrnlInstrumentOpLowering>(ctx);
 
   patterns.insert<KrnlRandomNormalOpLowering>(ctx);
   patterns.insert<KrnlFindIndexOpLowering>(ctx);
+  patterns.insert<onnx_mlir::KrnlPrintTensorOpLowering>(ctx, typeConverter);
+  patterns.insert<onnx_mlir::KrnlPrintOpLowering>(ctx, typeConverter);
 
   // Math library functions.
   patterns.insert<KrnlUnaryMathOpLowering<KrnlErfOp>>(ctx);
@@ -2002,6 +1701,255 @@ void mlir::checkConstantOutputs(
   }
 }
 
+void mlir::recordEntryPointSignatures(ModuleOp &module,
+    SmallVectorImpl<std::string> &entryPointNames,
+    SmallVectorImpl<std::string> &inSignatures,
+    SmallVectorImpl<std::string> &outSignatures) {
+  module->walk([&](KrnlEntryPointOp entryOp) -> WalkResult {
+    Operation *op = entryOp.getOperation();
+    // Entry point name.
+    llvm::StringRef entryPointName =
+        op->getAttrOfType<SymbolRefAttr>(
+              KrnlEntryPointOp::getEntryPointFuncAttrName())
+            .getLeafReference()
+            .getValue();
+    std::string terminatedEntryPointName = "run_" + entryPointName.str();
+    terminatedEntryPointName.push_back('\0'); // null terminate the string.
+    entryPointNames.emplace_back(terminatedEntryPointName);
+
+    // Input/output signatures.
+    StringAttr sigAttr =
+        op->getAttrOfType<StringAttr>(KrnlEntryPointOp::getSignatureAttrName());
+    llvm::StringRef signature = sigAttr.getValue();
+    auto splitSig = signature.split('@');
+    llvm::StringRef inSig = splitSig.first;
+    llvm::StringRef outSig = splitSig.second;
+    inSignatures.emplace_back(inSig.str());
+    outSignatures.emplace_back(outSig.str());
+
+    return WalkResult::advance();
+  });
+  // When there is only a single entry point function in a model, use
+  // DEFAULT_DYN_ENTRY_POINT.
+  if (entryPointNames.size() == 1) {
+    entryPointNames[0] = DEFAULT_DYN_ENTRY_POINT;
+    entryPointNames[0].push_back('\0'); // null terminate the string.
+  }
+}
+
+/// This function emits three functions: omQueryEntryPoints, omInputSignature
+/// and omOutputSignature.
+/// - omQueryEntryPoints has type of `**i8 ()` to query an array of entry point
+/// names.
+/// - omInputSignature and omOutputSignature have type of type `*i8 (*i8)` to
+/// return input and output signatures of the given entry point.
+void mlir::genSignatureFunction(ModuleOp module,
+    const ArrayRef<std::string> entryPointNames,
+    const ArrayRef<std::string> inSignatures,
+    const ArrayRef<std::string> outSignatures) {
+  MLIRContext *context = module.getContext();
+  Location loc = module.getLoc();
+  OpBuilder b(context);
+
+  // Common information.
+  Type i8Type = IntegerType::get(context, 8);
+  Type i32Type = IntegerType::get(context, 32);
+  Type i64Type = IntegerType::get(context, 64);
+  Type i8PtrTy = LLVM::LLVMPointerType::get(i8Type);
+  Type i8PtrPtrTy = LLVM::LLVMPointerType::get(i8PtrTy);
+  IntegerAttr zeroI32Attr = b.getI32IntegerAttr(0);
+  IntegerAttr zeroI64Attr = b.getI64IntegerAttr(0);
+  IntegerAttr oneI64Attr = b.getI64IntegerAttr(1);
+
+  uint64_t numOfEntryPoints = entryPointNames.size();
+
+  // A helper function to emit a global constant operation storing a string.
+  auto emitGlobalOp = [&context, &b, &loc, &i8Type](
+                          std::string name, std::string value) {
+    mlir::StringAttr valueAttr = mlir::StringAttr::get(context, value);
+    Type valueArrayType = LLVM::LLVMArrayType::get(i8Type, value.size());
+    LLVM::GlobalOp globalOp = b.create<LLVM::GlobalOp>(loc, valueArrayType,
+        /*isConstant=*/true, LLVM::Linkage::External, name, valueAttr);
+    return globalOp;
+  };
+
+  // A helper function to get a pointer to the first element in an array.
+  auto getGlobalOpGEP = [&loc, &b, &i8PtrTy, &i64Type, &zeroI64Attr](
+                            LLVM::GlobalOp op) {
+    Value zeroI64 = b.create<LLVM::ConstantOp>(loc, i64Type, zeroI64Attr);
+    Value address = b.create<LLVM::AddressOfOp>(loc, op);
+    LLVM::GEPOp gepOp = b.create<LLVM::GEPOp>(
+        loc, i8PtrTy, address, ArrayRef<Value>({zeroI64, zeroI64}));
+    return gepOp;
+  };
+
+  // For each entry point name, emit three global constants to store the entry
+  // point name and input/output signatures. For the i-th entry point, these
+  // constants are named as follows:
+  // - Entry point name: `_entry_point_i`.
+  // - Input signature: `_entry_point_i_in_sig`.
+  // - Output signature: `_entry_point_i_out_sig`.
+  OpBuilder::InsertionGuard guard(b);
+  b.setInsertionPointToStart(module.getBody());
+  SmallVector<LLVM::GlobalOp, 2> entryOps, inSigOps, outSigOps;
+  for (uint64_t i = 0; i < numOfEntryPoints; ++i) {
+    // Global constants for entry point names.
+    std::string entryVarName = "_entry_point_" + std::to_string(i);
+    LLVM::GlobalOp entryOp = emitGlobalOp(entryVarName, entryPointNames[i]);
+    entryOps.emplace_back(entryOp);
+
+    // Global constants for input signatures.
+    std::string inSigVarName = entryVarName + "_in_sig";
+    LLVM::GlobalOp inSigOp = emitGlobalOp(inSigVarName, inSignatures[i]);
+    inSigOps.emplace_back(inSigOp);
+
+    // Global constants for output signatures.
+    std::string outSigVarName = entryVarName + "_out_sig";
+    LLVM::GlobalOp outSigOp = emitGlobalOp(outSigVarName, outSignatures[i]);
+    outSigOps.emplace_back(outSigOp);
+  }
+
+  // Emit a global constant to store an array of pointers pointing to each entry
+  // point constants. The array ends with NULL.
+  auto arrayType = LLVM::LLVMArrayType::get(i8PtrTy, entryOps.size() + 1);
+  auto entryArrayOp = b.create<LLVM::GlobalOp>(loc, arrayType,
+      /*isConstant=*/true, LLVM::Linkage::Internal, "_entry_point_arrays",
+      Attribute());
+  { // Fill the initializer with pointers to entry point constants.
+    Region &region = entryArrayOp.getInitializerRegion();
+    Block *block = b.createBlock(&region);
+
+    // Initialize an array with the addresses of the global strings.
+    b.setInsertionPointToStart(block);
+    Value array = b.create<LLVM::UndefOp>(loc, arrayType);
+
+    uint32_t index = 0;
+    Value lastValue = array;
+    for (const LLVM::GlobalOp &globalOp : entryOps) {
+      LLVM::GEPOp strAddr = getGlobalOpGEP(globalOp);
+      lastValue = b.create<LLVM::InsertValueOp>(loc, arrayType, lastValue,
+          strAddr, b.getArrayAttr({b.getIndexAttr(index++)}));
+    }
+
+    // The last element of the array is NULL.
+    Value nullPtr = b.create<LLVM::NullOp>(loc, i8PtrTy);
+    lastValue = b.create<LLVM::InsertValueOp>(loc, arrayType, lastValue,
+        nullPtr, b.getArrayAttr({b.getIndexAttr(index++)}));
+    b.create<LLVM::ReturnOp>(loc, ArrayRef<Value>({lastValue}));
+  }
+
+  // Emit a function, omQueryEntryPoints, of type `**8 ()` to query an array of
+  // entry point names.
+  {
+    OpBuilder::InsertionGuard guard(b);
+    b.setInsertionPointToEnd(module.getBody());
+    // Emit the function type.
+    Type llvmFnType = LLVM::LLVMFunctionType::get(i8PtrPtrTy, {}, false);
+    LLVM::LLVMFuncOp funcOp =
+        b.create<LLVM::LLVMFuncOp>(loc, "omQueryEntryPoints", llvmFnType);
+    // Emit the body of the function.
+    Block *entryBlock = funcOp.addEntryBlock();
+    OpBuilder::InsertionGuard bodyGuard(b);
+    b.setInsertionPointToStart(entryBlock);
+    Value entryAddr = b.create<LLVM::AddressOfOp>(loc, entryArrayOp);
+    Value entryI8Ptr = b.create<LLVM::BitcastOp>(loc, i8PtrPtrTy, entryAddr);
+    b.create<LLVM::ReturnOp>(loc, ArrayRef<Value>({entryI8Ptr}));
+  }
+
+  // Emit two signature functions, omInputSignature and omOutputSignature, of
+  // type `*i8 (*i8)` at the end of the module.
+  SmallVector<std::string, 2> funcNames = {
+      "omInputSignature", "omOutputSignature"};
+  SmallVector<SmallVector<LLVM::GlobalOp, 2>, 2> sigOps = {inSigOps, outSigOps};
+  for (uint64_t i = 0; i < funcNames.size(); ++i) {
+    OpBuilder::InsertionGuard guard(b);
+    b.setInsertionPointToEnd(module.getBody());
+    // 1. Emit the function type.
+    Type llvmFnType = LLVM::LLVMFunctionType::get(i8PtrTy, {i8PtrTy}, false);
+    LLVM::LLVMFuncOp funcOp =
+        b.create<LLVM::LLVMFuncOp>(loc, funcNames[i], llvmFnType);
+
+    // 2. Emit the body of the function.
+    Block *entryBlock = funcOp.addEntryBlock();
+    OpBuilder::InsertionGuard bodyGuard(b);
+    b.setInsertionPointToStart(entryBlock);
+
+    Value zeroI32 = b.create<LLVM::ConstantOp>(loc, i32Type, zeroI32Attr);
+    Value oneI64 = b.create<LLVM::ConstantOp>(loc, i64Type, oneI64Attr);
+
+    // 2.1 A buffer to keep a pointer pointing to the return signature string.
+    Value ptrToReturnSig = b.create<LLVM::AllocaOp>(loc, i8PtrPtrTy, oneI64,
+        /*alignment=*/0);
+
+    // 2.2 The name of the entry point that we want to return its signature.
+    Value input = entryBlock->getArgument(0);
+
+    // 2.3 Emit code to find the signature of the given entry point.
+    // Iterate over the list of the entry points and check string equality.
+
+    // Split the current block into condition, true, false, and end blocks.
+    // - If the user's entry point name is found, go to the true block, then the
+    // end block.
+    // - Otherwise, recursively split the false block.
+    Block *condBlock, *trueBlock, *falseBlock, *endBlock;
+    condBlock = b.getInsertionBlock();
+    trueBlock = condBlock->splitBlock(b.getInsertionPoint());
+    falseBlock = b.createBlock(
+        trueBlock->getParent(), std::next(Region::iterator(trueBlock)));
+    endBlock = b.createBlock(
+        falseBlock->getParent(), std::next(Region::iterator(falseBlock)));
+
+    // Emit code for the end block.
+    b.setInsertionPointToStart(endBlock);
+    Value res = b.create<LLVM::LoadOp>(loc, i8PtrTy, ptrToReturnSig);
+    b.create<LLVM::ReturnOp>(loc, ArrayRef<Value>({res}));
+
+    // Emit code for the condition, true and false blocks.
+    for (uint64_t j = 0; j < numOfEntryPoints; ++j) {
+      LLVM::GlobalOp globalEntryPoint = entryOps[j];
+      LLVM::GlobalOp globalSignature = sigOps[i][j];
+      std::string entryPointName = entryPointNames[j];
+      // Emit code for the condition block.
+      b.setInsertionPointToEnd(condBlock);
+      // Read an entry point name.
+      Value entryI8Ptr = getGlobalOpGEP(globalEntryPoint).getResult();
+      // Compare it with the user's entry point name.
+      FlatSymbolRefAttr StrncmpRef = getOrInsertStrncmp(b, module);
+      Value length = b.create<LLVM::ConstantOp>(
+          loc, i64Type, b.getI64IntegerAttr(entryPointName.size()));
+      Value strncmpResult = b.create<LLVM::CallOp>(loc, i32Type, StrncmpRef,
+                                 ArrayRef<Value>({input, entryI8Ptr, length}))
+                                .getResult(0);
+      // Equal if strncmp returns `0`.
+      Value found = b.create<LLVM::ICmpOp>(
+          loc, LLVM::ICmpPredicate::eq, strncmpResult, zeroI32);
+      llvm::SmallVector<Value, 1> results = {entryI8Ptr};
+      // Branch the block into the true and false blocks.
+      b.create<LLVM::CondBrOp>(
+          loc, found, trueBlock, ValueRange(), falseBlock, ValueRange());
+
+      // Emit code for the true block.
+      b.setInsertionPointToStart(trueBlock);
+      Value sigAddr = b.create<LLVM::AddressOfOp>(loc, globalSignature);
+      Value sigI8Ptr = b.create<LLVM::BitcastOp>(loc, i8PtrTy, sigAddr);
+      b.create<LLVM::StoreOp>(loc, sigI8Ptr, ptrToReturnSig);
+      b.create<LLVM::BrOp>(loc, ValueRange(), endBlock);
+
+      // Emit code for the false block.
+      b.setInsertionPointToStart(falseBlock);
+      if (j == numOfEntryPoints - 1)
+        b.create<LLVM::BrOp>(loc, ValueRange(), endBlock);
+      else {
+        // Recursively do with the other entry point names.
+        condBlock = b.getInsertionBlock();
+        trueBlock = condBlock->splitBlock(b.getInsertionPoint());
+        falseBlock = b.createBlock(
+            trueBlock->getParent(), std::next(Region::iterator(trueBlock)));
+      }
+    }
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // KRNL + Standard + Vector + Affine dialects lowering to LLVM.
 //===----------------------------------------------------------------------===//
@@ -2031,6 +1979,12 @@ void ConvertKrnlToLLVMPass::runOnOperation() {
   SmallVector<bool, 4> constantOutputs;
   checkConstantOutputs(module, constantOutputs);
 
+  // Record entry point names and their input/output signatures.
+  // This info is used to generate global signature functions.
+  SmallVector<std::string, 1> entryPointNames, inSignatures, outSignatures;
+  recordEntryPointSignatures(
+      module, entryPointNames, inSignatures, outSignatures);
+
   // Define the target for this lowering i.e. the LLVM dialect.
   ConversionTarget target(getContext());
   target.addLegalDialect<LLVM::LLVMDialect>();
@@ -2058,8 +2012,9 @@ void ConvertKrnlToLLVMPass::runOnOperation() {
   // We lower in stages until all the code is in the LLVM dialect.
   RewritePatternSet patterns(&getContext());
 
-  populateAffineAndKrnlToLLVMConversion(
-      patterns, &getContext(), typeConverter, constantOutputs);
+  populateAffineAndKrnlToLLVMConversion(patterns, &getContext(), typeConverter,
+      constantOutputs,
+      /*singleEntryPoint=*/entryPointNames.size() == 1);
 
   // We want to completely lower to LLVM, so we use a `FullConversion`. This
   // ensures that only legal operations will remain after the conversion.
@@ -2067,6 +2022,10 @@ void ConvertKrnlToLLVMPass::runOnOperation() {
           applyFullConversion(getOperation(), target, std::move(patterns)))) {
     signalPassFailure();
   }
+
+  // Generate signature functions.
+  if (entryPointNames.size() >= 1)
+    genSignatureFunction(module, entryPointNames, inSignatures, outSignatures);
 }
 
 /// Create the pass for lowering `Krnl`, `Affine` and `Std` dialects to LLVM.
