@@ -50,9 +50,8 @@ void ModelBuilder::createEntryPoint(FuncOp &funcOp) {
 bool ModelBuilder::compileTest(const CompilerOptionList &compileOptions) {
   assert(!module.getBody()->empty() &&
          "Expecting the module to contain the test code");
-  assert(module.verify().succeeded() && "Malformed module");
 
-  OwningModuleRef modRef(module);
+  OwningOpRef<ModuleOp> modRef(module);
   setCompilerOptions(compileOptions);
   return (
       compileModule(modRef, ctx, sharedLibBaseName, onnx_mlir::EmitLib) == 0);
@@ -64,8 +63,7 @@ bool ModelBuilder::runAndVerifyTest(std::vector<OMTensorUniquePtr> &inputs,
   assert(!inputs.empty() && "Expecting valid inputs");
 
   // Run the test code.
-  onnx_mlir::ExecutionSession execSession(
-      getSharedLibName(sharedLibBaseName), "run_main_graph");
+  onnx_mlir::ExecutionSession execSession(getSharedLibName(sharedLibBaseName));
   auto outputs = execSession.run(move(inputs));
   assert(
       outputs.size() == expectedOutputs.size() && "Should have the same size");
