@@ -4,6 +4,9 @@ CMakePresets.json
 data/
 *.onnx
 pytest/*.txt
+pytest/brk
+pytest/*.tmp
+pytest/*.onnx.mlir
 
 # Prerequisites
 *.d
