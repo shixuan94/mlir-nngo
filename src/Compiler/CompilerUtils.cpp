@@ -29,6 +29,7 @@
 #include "llvm/Target/TargetMachine.h"
 
 #include "ExternalUtil.hpp"
+#include "src/Accelerators/Accelerator.hpp"
 #include "src/Compiler/CompilerUtils.hpp"
 #include "src/Conversion/KrnlToLLVM/ConvertKrnlToLLVM.hpp"
 #include "src/Support/OMOptions.hpp"
@@ -521,6 +522,16 @@ static void genLLVMBitcode(const mlir::OwningOpRef<ModuleOp> &module,
     llvm::errs() << "Failed to translate module to LLVMIR.\n";
     exit(1);
   }
+
+  // Emit metadata "zos_le_char_mode" for z/OS. Use EBCDIC codepage by default.
+  if (llvm::Triple(getTargetTripleOption()).isOSzOS()) {
+    StringRef charModeKey = "zos_le_char_mode";
+    if (!llvmModule->getModuleFlag(charModeKey)) {
+      auto val = llvm::MDString::get(llvmContext, "ebcdic");
+      llvmModule->addModuleFlag(llvm::Module::Error, charModeKey, val);
+    }
+  }
+
   llvm::WriteBitcodeToFile(*llvmModule, moduleBitcodeStream);
   moduleBitcodeStream.flush();
 
@@ -1034,7 +1045,17 @@ int compileModule(mlir::OwningOpRef<ModuleOp> &module,
   setupModule(module, context, outputBaseName);
 
   mlir::PassManager pm(&context, mlir::OpPassManager::Nesting::Implicit);
-  addPasses(module, pm, emissionTarget);
+  // Initialize accelerator if required
+  if (acceleratorTarget.compare("") != 0) {
+    std::vector<Accelerator *> *accTargets;
+    accTargets = Accelerator::getAcceleratorList();
+    for (auto accel : *accTargets) {
+      if (accel->isActive()) {
+        accel->prepareAccelerator(module, context, pm, emissionTarget);
+      }
+    }
+  } else
+    addPasses(module, pm, emissionTarget);
   mlir::applyPassManagerCLOptions(pm);
   mlir::applyDefaultTimingPassManagerCLOptions(pm);
 
