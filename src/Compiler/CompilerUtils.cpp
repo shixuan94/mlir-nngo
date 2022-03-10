@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
+#include "mlir/Conversion/SCFToGPU/SCFToGPUPass.h"
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
 #include "mlir/Support/FileUtilities.h"
@@ -776,6 +777,10 @@ void addKrnlToAffinePasses(mlir::PassManager &pm) {
   //  pm.addPass(mlir::createLoopFusionPass());
 }
 
+void addAffineToGPUPasses(mlir::PassManager &pm) {
+  pm.addNestedPass<FuncOp>(mlir::createAffineForToGPUPass()); 
+}
+
 void addKrnlToLLVMPasses(mlir::OpPassManager &pm) {
   pm.addNestedPass<FuncOp>(mlir::createConvertVectorToSCFPass());
   pm.addPass(mlir::createLowerAffinePass());
@@ -1029,7 +1034,13 @@ static void addPasses(mlir::OwningOpRef<ModuleOp> &module,
       addONNXToKrnlPasses(pm, OptimizationLevel);
     if (inputIRLevel <= MLIRLevel)
       addKrnlToAffinePasses(pm);
+      if (enableGPU) {
+        addAffineToGPUPasses(pm);
+      }
   }
+
+
+
 
   if (inputIRLevel <= LLVMLevel && emissionTarget >= EmitLLVMIR)
     addKrnlToLLVMPasses(pm);
