@@ -778,6 +778,7 @@ void addKrnlToAffinePasses(mlir::PassManager &pm) {
 }
 
 void addAffineToGPUPasses(mlir::PassManager &pm) {
+  // TODO: affine.load to memref.load.
   pm.addNestedPass<FuncOp>(mlir::createAffineForToGPUPass()); 
 }
 
@@ -1032,15 +1033,13 @@ static void addPasses(mlir::OwningOpRef<ModuleOp> &module,
   if (emissionTarget >= EmitMLIR) {
     if (inputIRLevel <= ONNXLevel)
       addONNXToKrnlPasses(pm, OptimizationLevel);
-    if (inputIRLevel <= MLIRLevel)
+    if (inputIRLevel <= MLIRLevel) {
       addKrnlToAffinePasses(pm);
       if (enableGPU) {
         addAffineToGPUPasses(pm);
       }
+    }
   }
-
-
-
 
   if (inputIRLevel <= LLVMLevel && emissionTarget >= EmitLLVMIR)
     addKrnlToLLVMPasses(pm);
