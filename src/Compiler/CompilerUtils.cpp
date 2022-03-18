@@ -778,7 +778,9 @@ void addKrnlToAffinePasses(mlir::PassManager &pm) {
 }
 
 void addAffineToGPUPasses(mlir::PassManager &pm) {
-  // TODO: affine.load to memref.load.
+  // TODO: 
+  // affine.load to memref.load.
+  pm.addPass(mlir::createLowerAffinePass());
   pm.addNestedPass<FuncOp>(mlir::createAffineForToGPUPass()); 
 }
 
