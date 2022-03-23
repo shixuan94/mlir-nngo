@@ -11,9 +11,11 @@
 // Functions for adding passes and processing input files.
 //
 //===----------------------------------------------------------------------===//
+#include "mlir/Conversion/SCFToGPU/SCFToGPUPass.h"
+#include "src/Conversion/AffineToStandard/AffineToStandard.h"
+
 
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
-#include "mlir/Conversion/SCFToGPU/SCFToGPUPass.h"
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
 #include "mlir/Support/FileUtilities.h"
@@ -778,9 +780,6 @@ void addKrnlToAffinePasses(mlir::PassManager &pm) {
 }
 
 void addAffineToGPUPasses(mlir::PassManager &pm) {
-  // TODO: 
-  // affine.load to memref.load.
-  pm.addPass(mlir::createLowerAffinePass());
   pm.addNestedPass<FuncOp>(mlir::createAffineForToGPUPass()); 
 }
 
@@ -1037,6 +1036,8 @@ static void addPasses(mlir::OwningOpRef<ModuleOp> &module,
       addONNXToKrnlPasses(pm, OptimizationLevel);
     if (inputIRLevel <= MLIRLevel) {
       addKrnlToAffinePasses(pm);
+
+      pm.addPass(nngo::createLowerAffinePass());
       if (enableGPU) {
         addAffineToGPUPasses(pm);
       }
