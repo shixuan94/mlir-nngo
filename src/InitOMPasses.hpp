@@ -2,10 +2,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+//===----------- InitOMPasses.hpp - Init onnx-mlir passes  ----------------===//
+//
+// Copyright 2019-2022 The IBM Research Authors.
+//
+// =============================================================================
+//
+//===----------------------------------------------------------------------===//
+
 #include "mlir/Pass/Pass.h"
 #include "src/Pass/Passes.hpp"
-
-using namespace onnx_mlir;
 
 namespace onnx_mlir {
 
@@ -53,7 +59,7 @@ void initOMPasses(int optLevel) {
   });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return createConvertKrnlToAffinePass();
+    return krnl::createConvertKrnlToAffinePass();
   });
 
   mlir::registerPass([optLevel]() -> std::unique_ptr<mlir::Pass> {
@@ -62,6 +68,10 @@ void initOMPasses(int optLevel) {
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return createElideConstGlobalValuePass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return krnl::createConvertSeqToMemrefPass();
   });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
@@ -76,4 +86,5 @@ void initOMPasses(int optLevel) {
     return createLowerKrnlShapePass();
   });
 }
+
 } // namespace onnx_mlir

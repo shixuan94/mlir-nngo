@@ -10,6 +10,7 @@ add_onnx_mlir_dialect(Krnl krnl)
 add_onnx_mlir_dialect_doc(krnl Krnl.td)
 
 add_onnx_mlir_library(OMKrnlOps
+  DialectBuilder.cpp
   KrnlOps.cpp
   KrnlTypes.cpp
   KrnlHelper.cpp
@@ -20,4 +21,5 @@ add_onnx_mlir_library(OMKrnlOps
 
   LINK_LIBS PUBLIC
   OMONNXOps
+  MLIRLLVMCommonConversion
   )

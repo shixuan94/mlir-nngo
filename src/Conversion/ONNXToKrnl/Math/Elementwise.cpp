@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "src/Conversion/ONNXToKrnl/ONNXToKrnlCommon.hpp"
+#include "src/Dialect/Krnl/DialectBuilder.hpp"
 #include "src/Dialect/ONNX/ShapeInference/ONNXShapeHelper.hpp"
 
 using namespace mlir;
@@ -903,11 +904,12 @@ struct ONNXElementwiseUnaryOpLowering : public ConversionPattern {
         loopIVs.push_back(arg);
     }
 
-    auto loadedVal = rewriter.create<KrnlLoadOp>(loc, X, loopIVs);
+    KrnlBuilder createKrnl(rewriter, loc);
+    Value loadedVal = createKrnl.load(X, loopIVs);
     auto loweredOpResult = emitScalarOpFor<ElementwiseUnaryOp>(
         rewriter, loc, op, memRefType.getElementType(), {loadedVal});
     // Store result in the resulting array.
-    rewriter.create<KrnlStoreOp>(loc, loweredOpResult, alloc, loopIVs);
+    createKrnl.store(loweredOpResult, alloc, loopIVs);
 
     rewriter.replaceOp(op, alloc);
     return success();
@@ -945,7 +947,7 @@ struct ONNXElementwiseBinaryOpLowering : public ConversionPattern {
         isUniBroadcasting);
     DimsExpr empty;
     auto shapecomputed = shapeHelper.computeShape(operands, empty);
-    assert(succeeded(shapecomputed));
+    assert(succeeded(shapecomputed) && "Could not compute output shape");
     // Scope for krnl ops
     IndexExprScope outerScope(&rewriter, shapeHelper.scope);
     KrnlBuilder createKrnl(rewriter, loc);
@@ -1023,7 +1025,7 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
     // Even when the dim is unknown at compile time
     DimsExpr empty;
     LogicalResult shapecomputed = shapeHelper.computeShape(operands, empty);
-    assert(succeeded(shapecomputed));
+    assert(succeeded(shapecomputed) && "Could not compute output shape");
     IndexExprScope outerScope(&rewriter, shapeHelper.scope);
     KrnlBuilder createKrnl(rewriter, loc);
 
@@ -1102,7 +1104,7 @@ struct ONNXWhereOpLowering : public ConversionPattern {
         loadDenseElementArrayValueAtIndex);
     DimsExpr empty;
     auto shapecomputed = shapeHelper.computeShape(operands, empty);
-    assert(succeeded(shapecomputed));
+    assert(succeeded(shapecomputed) && "Could not compute output shape");
     // Scope for krnl ops
     IndexExprScope outerScope(&rewriter, shapeHelper.scope);
     KrnlBuilder createKrnl(rewriter, loc);
