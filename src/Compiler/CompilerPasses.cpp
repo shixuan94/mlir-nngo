@@ -109,6 +109,18 @@ void addKrnlToLLVMPasses(mlir::OpPassManager &pm) {
   pm.addPass(mlir::createCanonicalizerPass());
 }
 
+void addAffineToGPUPasses(mlir::PassManager &pm) {
+  pm.addNestedPass<FuncOp>(mlir::createAffineForToGPUPass()); 
+  pm.addPass(mlir::createGpuKernelOutliningPass());
+  pm.addPass(mlir::createLowerGpuOpsToNVVMOpsPass());
+
+
+  // registerGpuSerializeToCubinPass();
+
+
+  pm.addPass(mlir::createGpuToLLVMConversionPass());
+}
+
 InputIRLevelType determineInputIRLevel(mlir::OwningOpRef<ModuleOp> &module) {
   Operation *moduleOp = module->getOperation();
 
@@ -145,12 +157,19 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
   if (emissionTarget >= EmitMLIR) {
     if (inputIRLevel <= ONNXLevel)
       addONNXToKrnlPasses(pm, OptimizationLevel);
-    if (inputIRLevel <= MLIRLevel)
+    if (inputIRLevel <= MLIRLevel) {
       addKrnlToAffinePasses(pm);
+
+      // pm.addPass(mlir::createLowerAffinePass());
+      // pm.addPass(mlir::createConvertSCFToCFPass());
+
+      pm.addPass(nngo::createLowerAffinePass());
+      if (enableGPU) {
+        addAffineToGPUPasses(pm);
+      }
+    }
   }
 
   if (inputIRLevel <= LLVMLevel && emissionTarget >= EmitLLVMIR)
     addKrnlToLLVMPasses(pm);
 }
-
-} // namespace onnx_mlir
