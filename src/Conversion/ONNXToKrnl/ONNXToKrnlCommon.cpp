@@ -14,11 +14,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "src/Conversion/ONNXToKrnl/ONNXToKrnlCommon.hpp"
-#include "src/Dialect/ONNX/MLIRDialectBuilder.hpp"
-
-using namespace onnx_mlir;
-
-using namespace onnx_mlir;
+#include "src/Dialect/Krnl/DialectBuilder.hpp"
+#include "src/Dialect/Mlir/DialectBuilder.hpp"
 
 bool ONNXToKrnl_gEmitDealloc = false;
 
@@ -521,7 +518,7 @@ Value emitArgSort(ConversionPatternRewriter &rewriter, Location loc,
   ValueRange loopDef = createKrnl.defineLoops(rank);
   createKrnl.iterateIE(loopDef, loopDef, lbs, outerUbs,
       [&](KrnlBuilder &createKrnl, ValueRange iLoopInd) {
-        IndexExpr i1 = DimIndexExpr(iLoopInd[axis]) + LiteralIndexExpr(1);
+        IndexExpr i1 = DimIndexExpr(iLoopInd[axis]) + oneIE;
         ValueRange swapLoopDef = createKrnl.defineLoops(1);
         createKrnl.iterateIE(swapLoopDef, swapLoopDef, {i1}, {ubs[axis]},
             [&](KrnlBuilder &createKrnl, ValueRange swapLoopInd) {
