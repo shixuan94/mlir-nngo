@@ -17,6 +17,8 @@
 #include "src/Dialect/Krnl/DialectBuilder.hpp"
 #include "src/Dialect/Mlir/DialectBuilder.hpp"
 
+using namespace onnx_mlir;
+
 bool ONNXToKrnl_gEmitDealloc = false;
 
 Value OnnxToKrnlBuilder::reshape(

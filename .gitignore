@@ -5,6 +5,7 @@ data/
 *.onnx
 pytest/
 !pytest/main.ipynb
+mainbuild/
 
 # Prerequisites
 *.d
