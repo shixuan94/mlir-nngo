@@ -522,14 +522,14 @@ public:
 void nngo::populateAffineToStdConversionPatterns(mlir::RewritePatternSet &patterns) {
   // clang-format off
   patterns.add<
-      AffineApplyLowering,
-      AffineDmaStartLowering,
-      AffineDmaWaitLowering,
+      // AffineApplyLowering,
+      // AffineDmaStartLowering,
+      // AffineDmaWaitLowering,
       AffineLoadLowering,
-      AffineMinLowering,
-      AffineMaxLowering,
-      AffineParallelLowering,
-      AffinePrefetchLowering,
+      // AffineMinLowering,
+      // AffineMaxLowering,
+      // AffineParallelLowering,
+      // AffinePrefetchLowering,
       AffineStoreLowering
       // AffineForLowering,
       // AffineIfLowering

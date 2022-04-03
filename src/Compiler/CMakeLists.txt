@@ -45,6 +45,9 @@ add_onnx_mlir_library(CompilerUtils
   MLIRLinalgTransforms
   MLIRLLVMToLLVMIRTranslation
   MLIRSCFToGPU
+  MLIRGPUToGPURuntimeTransforms
+  MLIRSCFToControlFlow
+  MLIRGPUToNVVMTransforms
 
   # Link LLVM libraries necessary to query which target architectures are configured.
   LINK_COMPONENTS PRIVATE

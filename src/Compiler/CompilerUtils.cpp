@@ -13,6 +13,11 @@
 //===----------------------------------------------------------------------===//
 #include "mlir/Conversion/SCFToGPU/SCFToGPUPass.h"
 #include "src/Conversion/AffineToStandard/AffineToStandard.h"
+#include "mlir/Conversion/GPUCommon/GPUCommonPass.h"
+#include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
+#include "mlir/Dialect/GPU/Passes.h"
+#include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"
+// #include "src/Conversion/SerializeToCubin/SerializeToCubin.hpp"
 
 
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
@@ -781,6 +786,14 @@ void addKrnlToAffinePasses(mlir::PassManager &pm) {
 
 void addAffineToGPUPasses(mlir::PassManager &pm) {
   pm.addNestedPass<FuncOp>(mlir::createAffineForToGPUPass()); 
+  pm.addPass(mlir::createGpuKernelOutliningPass());
+  pm.addPass(mlir::createLowerGpuOpsToNVVMOpsPass());
+
+
+  // registerGpuSerializeToCubinPass();
+
+
+  pm.addPass(mlir::createGpuToLLVMConversionPass());
 }
 
 void addKrnlToLLVMPasses(mlir::OpPassManager &pm) {
@@ -1036,6 +1049,9 @@ static void addPasses(mlir::OwningOpRef<ModuleOp> &module,
       addONNXToKrnlPasses(pm, OptimizationLevel);
     if (inputIRLevel <= MLIRLevel) {
       addKrnlToAffinePasses(pm);
+
+      // pm.addPass(mlir::createLowerAffinePass());
+      // pm.addPass(mlir::createConvertSCFToCFPass());
 
       pm.addPass(nngo::createLowerAffinePass());
       if (enableGPU) {
