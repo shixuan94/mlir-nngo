@@ -42,6 +42,9 @@ pytest/
 # Filesystem
 .DS_Store
 
+# Nested build directory
+/build*
+
 # The following .gitignore content is taken from
 # https://github.com/github/gitignore/blob/main/Python.gitignore
 
