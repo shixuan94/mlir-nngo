@@ -6,6 +6,7 @@ data/
 pytest/
 !pytest/main.ipynb
 mainbuild/
+mergebuild/
 
 # Prerequisites
 *.d

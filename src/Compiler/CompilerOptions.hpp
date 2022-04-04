@@ -21,6 +21,7 @@
 extern const std::string OnnxMlirEnvOptionName;
 
 namespace onnx_mlir {
+extern llvm::cl::opt<bool> dbgFinalPass;
 extern llvm::cl::opt<bool> enableGPU;
 extern llvm::cl::OptionCategory OnnxMlirOptions;
 

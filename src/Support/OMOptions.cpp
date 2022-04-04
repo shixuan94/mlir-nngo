@@ -54,3 +54,7 @@ llvm::cl::opt<OptLevel> OptimizationLevel(
 llvm::cl::opt<bool> enableGPU("enable-gpu",
     llvm::cl::desc("lowering to gpu"),
     llvm::cl::init(false), llvm::cl::cat(OMPassOptions));
+
+llvm::cl::opt<bool> dbgFinalPass("dbg-final-pass",
+    llvm::cl::desc("run pass to last pass for debug"),
+    llvm::cl::init(false), llvm::cl::cat(OMPassOptions));

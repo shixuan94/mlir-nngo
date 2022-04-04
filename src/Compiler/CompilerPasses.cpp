@@ -12,6 +12,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "mlir/Conversion/SCFToGPU/SCFToGPUPass.h"
+#include "src/Conversion/AffineToStandard/AffineToStandard.h"
+#include "mlir/Conversion/GPUCommon/GPUCommonPass.h"
+#include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
+#include "mlir/Dialect/GPU/Passes.h"
+#include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"
+
 #include "mlir/Conversion/Passes.h"
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Conversion/VectorToLLVM/ConvertVectorToLLVM.h"
@@ -110,15 +117,17 @@ void addKrnlToLLVMPasses(mlir::OpPassManager &pm) {
 }
 
 void addAffineToGPUPasses(mlir::PassManager &pm) {
-  pm.addNestedPass<FuncOp>(mlir::createAffineForToGPUPass()); 
-  pm.addPass(mlir::createGpuKernelOutliningPass());
-  pm.addPass(mlir::createLowerGpuOpsToNVVMOpsPass());
 
 
   // registerGpuSerializeToCubinPass();
 
 
-  pm.addPass(mlir::createGpuToLLVMConversionPass());
+  if(dbgFinalPass) {
+    pm.addNestedPass<FuncOp>(mlir::createAffineForToGPUPass()); 
+    pm.addPass(mlir::createGpuKernelOutliningPass());
+    pm.addPass(mlir::createLowerGpuOpsToNVVMOpsPass());
+    pm.addPass(mlir::createGpuToLLVMConversionPass());
+  }
 }
 
 InputIRLevelType determineInputIRLevel(mlir::OwningOpRef<ModuleOp> &module) {
@@ -172,4 +181,5 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
 
   if (inputIRLevel <= LLVMLevel && emissionTarget >= EmitLLVMIR)
     addKrnlToLLVMPasses(pm);
+}
 }

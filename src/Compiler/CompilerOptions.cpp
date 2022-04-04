@@ -21,6 +21,14 @@
 #define DEBUG_TYPE "compiler_options"
 
 namespace onnx_mlir {
+llvm::cl::opt<bool> dbgFinalPass("dbg-final-pass",
+    llvm::cl::desc("run pass to last pass for debug"),
+    llvm::cl::init(false), llvm::cl::cat(OMPassOptions));
+
+llvm::cl::opt<bool> enableGPU("enable-gpu",
+    llvm::cl::desc("lowering to gpu"),
+    llvm::cl::init(false), llvm::cl::cat(OMPassOptions));
+
 llvm::cl::OptionCategory OnnxMlirOptions(
     "ONNX-MLIR Options", "These are frontend options.");
 

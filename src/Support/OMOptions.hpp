@@ -26,4 +26,5 @@ extern llvm::cl::opt<bool> enableMemoryBundling;
 extern llvm::cl::opt<int> onnxOpTransformThreshold;
 extern llvm::cl::opt<bool> onnxOpTransformReport;
 extern llvm::cl::opt<bool> enableGPU;
+extern llvm::cl::opt<bool> dbgFinalPass;
 extern llvm::cl::opt<onnx_mlir::OptLevel> OptimizationLevel;
