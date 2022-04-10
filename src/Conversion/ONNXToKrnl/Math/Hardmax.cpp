@@ -4,7 +4,7 @@
 
 //===----------------- Hardmax.cpp - Hardmax Op ---------------------------===//
 //
-// Copyright 2019 The IBM Research Authors.
+// Copyright 2019-2022 The IBM Research Authors.
 //
 // =============================================================================
 //
@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "src/Conversion/ONNXToKrnl/ONNXToKrnlCommon.hpp"
+#include "src/Dialect/Krnl/DialectBuilder.hpp"
 #include "src/Dialect/Krnl/KrnlOps.hpp"
 
 using namespace mlir;
@@ -74,8 +75,9 @@ static Value emitArgmax(ConversionPatternRewriter &rewriter, Location loc,
 }
 
 struct ONNXHardmaxOpLowering : public ConversionPattern {
-  ONNXHardmaxOpLowering(MLIRContext *ctx)
-      : ConversionPattern(mlir::ONNXHardmaxOp::getOperationName(), 1, ctx) {}
+  ONNXHardmaxOpLowering(TypeConverter &typeConverter, MLIRContext *ctx)
+      : ConversionPattern(
+            typeConverter, mlir::ONNXHardmaxOp::getOperationName(), 1, ctx) {}
   LogicalResult matchAndRewrite(Operation *op, ArrayRef<Value> operands,
       ConversionPatternRewriter &rewriter) const final {
     Location loc = op->getLoc();
@@ -141,7 +143,7 @@ struct ONNXHardmaxOpLowering : public ConversionPattern {
   }
 };
 
-void populateLoweringONNXHardmaxOpPattern(
-    RewritePatternSet &patterns, MLIRContext *ctx) {
-  patterns.insert<ONNXHardmaxOpLowering>(ctx);
+void populateLoweringONNXHardmaxOpPattern(RewritePatternSet &patterns,
+    TypeConverter &typeConverter, MLIRContext *ctx) {
+  patterns.insert<ONNXHardmaxOpLowering>(typeConverter, ctx);
 }

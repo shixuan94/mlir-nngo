@@ -39,7 +39,12 @@ tools = [
     'onnx-mlir-opt',
     'mlir-opt',
     'mlir-translate',
-    'binary-decoder',
 ]
 
 llvm_config.add_tool_substitutions(tools, tool_dirs)
+
+# This is based on the same code in llvm and it is meant to determine what
+# the supported targets for llvm & friends are - this allow us to filter test
+# execution based on the available targets
+for arch in config.targets_to_build.split():
+    config.available_features.add(arch.lower())

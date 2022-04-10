@@ -4,6 +4,10 @@
 
 //===---------------- ArgMax.cpp - Lowering ArgMax Op -------------------===//
 //
+// Copyright 2021-2022 The IBM Research Authors.
+//
+// =============================================================================
+//
 // This file lowers the ONNX ArgMax Operator to Krnl dialect.
 //
 //===----------------------------------------------------------------------===//
@@ -15,8 +19,9 @@
 using namespace mlir;
 
 struct ONNXArgMaxOpLowering : public ConversionPattern {
-  ONNXArgMaxOpLowering(MLIRContext *ctx)
-      : ConversionPattern(mlir::ONNXArgMaxOp::getOperationName(), 1, ctx) {}
+  ONNXArgMaxOpLowering(TypeConverter &typeConverter, MLIRContext *ctx)
+      : ConversionPattern(
+            typeConverter, mlir::ONNXArgMaxOp::getOperationName(), 1, ctx) {}
 
   LogicalResult matchAndRewrite(Operation *op, ArrayRef<Value> operands,
       ConversionPatternRewriter &rewriter) const final {
@@ -81,7 +86,8 @@ struct ONNXArgMaxOpLowering : public ConversionPattern {
       loopIVs.push_back(arg);
     }
 
-    rewriter.create<KrnlStoreOp>(loc, minusOne, alloc, loopIVs);
+    MultiDialectBuilder<KrnlBuilder, MathBuilder> create(rewriter, loc);
+    create.krnl.store(minusOne, alloc, loopIVs);
 
     rewriter.restoreInsertionPoint(initLoopBody);
 
@@ -96,25 +102,22 @@ struct ONNXArgMaxOpLowering : public ConversionPattern {
     // Handle the operation:
     SmallVector<Value, 4> inLoopIVs, outLoopIVs, maxLoopIVs;
 
-    for (int i = 0; i < dataRank; ++i) {
+    for (int i = 0; i < dataRank; ++i)
       inLoopIVs.push_back(calcLoops.getInductionVar(i));
-    }
 
     for (int i = 0; i < reducedRank; ++i) {
-      if (outInDimMap.find(i) != outInDimMap.end()) {
+      if (outInDimMap.find(i) != outInDimMap.end())
         outLoopIVs.push_back(inLoopIVs[outInDimMap[i]]);
-      } else {
+      else
         outLoopIVs.push_back(zeroIndex);
-      }
     }
 
-    Value next = rewriter.create<KrnlLoadOp>(loc, data, inLoopIVs);
-    Value idx = rewriter.create<KrnlLoadOp>(loc, alloc, outLoopIVs);
+    Value next = create.krnl.load(data, inLoopIVs);
+    Value idx = create.krnl.load(alloc, outLoopIVs);
 
     // if index is less than 0, we should set 0 as initial position
-    Value lessThanZero = rewriter.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::slt, idx, zero);
-    idx = rewriter.create<SelectOp>(loc, lessThanZero, zero, idx);
+    Value lessThanZero = create.math.slt(idx, zero);
+    idx = create.math.select(lessThanZero, zero, idx);
 
     // induction variables of current max value
     for (int i = 0; i < dataRank; ++i) {
@@ -122,24 +125,23 @@ struct ONNXArgMaxOpLowering : public ConversionPattern {
         maxLoopIVs.push_back(calcLoops.getInductionVar(i));
       else
         maxLoopIVs.push_back(rewriter.create<arith::IndexCastOp>(
-            loc, idx, rewriter.getIndexType()));
+            loc, rewriter.getIndexType(), idx));
     }
-    Value maxVal = rewriter.create<KrnlLoadOp>(loc, data, maxLoopIVs);
+    Value maxVal = create.krnl.load(data, maxLoopIVs);
 
     // if next value is larger than current max value, update index
-    Value greaterThanMax = rewriter.create<arith::CmpFOp>(
-        loc, arith::CmpFPredicate::OGT, next, maxVal);
+    Value greaterThanMax = create.math.sgt(next, maxVal);
     Value pos = rewriter.create<arith::IndexCastOp>(
-        loc, inLoopIVs[axis], rewriter.getIntegerType(64));
-    idx = rewriter.create<SelectOp>(loc, greaterThanMax, pos, idx);
-    rewriter.create<KrnlStoreOp>(loc, idx, alloc, outLoopIVs);
+        loc, rewriter.getIntegerType(64), inLoopIVs[axis]);
+    idx = create.math.select(greaterThanMax, pos, idx);
+    create.krnl.store(idx, alloc, outLoopIVs);
 
     rewriter.replaceOp(op, alloc);
     return success();
   }
 };
 
-void populateLoweringONNXArgMaxOpPattern(
-    RewritePatternSet &patterns, MLIRContext *ctx) {
-  patterns.insert<ONNXArgMaxOpLowering>(ctx);
+void populateLoweringONNXArgMaxOpPattern(RewritePatternSet &patterns,
+    TypeConverter &typeConverter, MLIRContext *ctx) {
+  patterns.insert<ONNXArgMaxOpLowering>(typeConverter, ctx);
 }

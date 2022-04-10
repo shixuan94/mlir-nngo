@@ -4,7 +4,7 @@
 
 //===----------------- GRU.cpp - Lowering GRU Op --------------------------===//
 //
-// Copyright 2019 The IBM Research Authors.
+// Copyright 2019-2022 The IBM Research Authors.
 //
 // =============================================================================
 //
@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "src/Conversion/ONNXToKrnl/RNN/RNNBase.hpp"
-#include "src/Dialect/ONNX/MLIRDialectBuilder.hpp"
+#include "src/Dialect/Mlir/DialectBuilder.hpp"
 
 using namespace mlir;
 
@@ -615,8 +615,8 @@ void stateToOutput<ONNXGRUOp, GruState>(ConversionPatternRewriter &rewriter,
   }
 }
 
-void populateLoweringONNXGRUOpPattern(
-    OwningRewritePatternList &patterns, MLIRContext *ctx) {
+void populateLoweringONNXGRUOpPattern(RewritePatternSet &patterns,
+    TypeConverter &typeConverter, MLIRContext *ctx) {
   patterns.insert<ONNXRNNOpLowering<ONNXGRUOp, GruState, GruActivationPack,
-      GruWeightPack, GruBiasPack>>(ctx);
+      GruWeightPack, GruBiasPack>>(typeConverter, ctx);
 }

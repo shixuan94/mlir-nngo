@@ -4,7 +4,7 @@
 
 //===-------------- CumSum.cpp - Lowering CumSum Ops ----------------------===//
 //
-// Copyright 2019 The IBM Research Authors.
+// Copyright 2019-2022 The IBM Research Authors.
 //
 // =============================================================================
 //
@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "src/Conversion/ONNXToKrnl/ONNXToKrnlCommon.hpp"
+#include "src/Dialect/Krnl/DialectBuilder.hpp"
 #include "src/Dialect/ONNX/ShapeInference/ONNXShapeHelper.hpp"
 
 using namespace mlir;
@@ -44,8 +45,8 @@ static Value getLoopIndexByAxisAndOffset(MathBuilder &createMath,
       isValidOffset = createMath.sge(iOffset, zero);
     }
 
-    Value ok = createMath._and(isAxis, isValidOffset);
-    notSameAsBaseIndex = createMath._or(ok, notSameAsBaseIndex);
+    Value ok = createMath.andi(isAxis, isValidOffset);
+    notSameAsBaseIndex = createMath.ori(ok, notSameAsBaseIndex);
 
     Value accessIndex = createMath.select(ok, iOffset, iVal);
     resLoopIndex.emplace_back(accessIndex);
@@ -54,8 +55,9 @@ static Value getLoopIndexByAxisAndOffset(MathBuilder &createMath,
 }
 
 struct ONNXCumSumOpLowering : public ConversionPattern {
-  ONNXCumSumOpLowering(MLIRContext *ctx)
-      : ConversionPattern(ONNXCumSumOp::getOperationName(), 1, ctx) {}
+  ONNXCumSumOpLowering(TypeConverter &typeConverter, MLIRContext *ctx)
+      : ConversionPattern(
+            typeConverter, ONNXCumSumOp::getOperationName(), 1, ctx) {}
 
   /// We use a paralel algorithm for cumsum [1] as follows:
   /// Assume that input is x whose shape in [n,m], and axis for cumsum is 0.
@@ -107,7 +109,7 @@ struct ONNXCumSumOpLowering : public ConversionPattern {
 
     MemRefBoundsIndexCapture xBounds(X);
     uint64_t rank = xBounds.getRank();
-    LiteralIndexExpr zero(0);
+    LiteralIndexExpr zeroIE(0);
 
     // Read axis.
     ArrayValueIndexCapture axisCapture(axis,
@@ -154,7 +156,7 @@ struct ONNXCumSumOpLowering : public ConversionPattern {
     }
 
     // Input and output have the same shape, so they share the bounds.
-    SmallVector<IndexExpr, 4> lbs(rank, zero);
+    SmallVector<IndexExpr, 4> lbs(rank, zeroIE);
     SmallVector<IndexExpr, 4> ubs;
     xBounds.getDimList(ubs);
 
@@ -193,7 +195,7 @@ struct ONNXCumSumOpLowering : public ConversionPattern {
 
     // Outer loop iterates over the number of steps.
     ValueRange stepLoopDef = createKrnl.defineLoops(1);
-    createKrnl.iterateIE(stepLoopDef, stepLoopDef, {zero}, {numberOfStep},
+    createKrnl.iterateIE(stepLoopDef, stepLoopDef, {zeroIE}, {numberOfStep},
         [&](KrnlBuilder &createKrnl, ValueRange stepLoopInd) {
           MathBuilder createMath(createKrnl);
 
@@ -244,7 +246,7 @@ struct ONNXCumSumOpLowering : public ConversionPattern {
   }
 };
 
-void populateLoweringONNXCumSumOpPattern(
-    RewritePatternSet &patterns, MLIRContext *ctx) {
-  patterns.insert<ONNXCumSumOpLowering>(ctx);
+void populateLoweringONNXCumSumOpPattern(RewritePatternSet &patterns,
+    TypeConverter &typeConverter, MLIRContext *ctx) {
+  patterns.insert<ONNXCumSumOpLowering>(typeConverter, ctx);
 }

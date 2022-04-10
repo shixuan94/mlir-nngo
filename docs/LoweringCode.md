@@ -46,14 +46,14 @@ MathBuilder createMath(rewriter, loc); // Use original info.
 MathBuilder createMath(createKrnl);    // Use info stored in another builder.
 ```
 
-The Math builder contains the operations listed below. Most are self explanatory. They handle both integer and float operations, and will generate an assert when a specific operation is not supported for a specific type.  Up to date info should be looked from the [MLIRDialectBuilder.hpp](../src/Dialect/ONNX/MLIRDialectBuilder.hpp) file.
+The Math builder contains the operations listed below. Most are self explanatory. They handle both integer and float operations, and will generate an assert when a specific operation is not supported for a specific type.  Up to date info should be looked from the [MLIRDialectBuilder.hpp](../src/Dialect/Mlir/DialectBuilder.hpp) file.
 
 ```C++
 struct MathBuilder : DialectBuilder {
   MathBuilder(OpBuilder &b, Location loc);
   MathBuilder(DialectBuilder &db);
 
-  Value _and(Value lhs, Value rhs);
+  Value andi(Value lhs, Value rhs);
   Value add(Value lhs, Value rhs);
   Value sub(Value lhs, Value rhs);
   Value mul(Value lhs, Value rhs);
@@ -86,7 +86,7 @@ struct MemRefBuilder : DialectBuilder {
 ```
 ***Code: MemRef builder class.***
 
-It defines 4 distinct methods: how to allocate memory (`alloc`) and free (`dealloc`) memory from the heap, how to allocate memory on the stack (`alloca`), and how to extract the dimension of a multi-dimensional memory reference for a given dimension. The `alloca` method above allows for the multi-dimensional memory to have dynamic dimensions; these dynamic dimensions are specified by the parameter `dynSymbols`.  There are variant of these methods for static dimensions only and for providing alignment constraints. See the [MLIRDialectBuilder.hpp](../src/Dialect/ONNX/MLIRDialectBuilder.hpp) file for the full set of supported operations.
+It defines 4 distinct methods: how to allocate memory (`alloc`) and free (`dealloc`) memory from the heap, how to allocate memory on the stack (`alloca`), and how to extract the dimension of a multi-dimensional memory reference for a given dimension. The `alloca` method above allows for the multi-dimensional memory to have dynamic dimensions; these dynamic dimensions are specified by the parameter `dynSymbols`.  There are variant of these methods for static dimensions only and for providing alignment constraints. See the [MLIRDialectBuilder.hpp](../src/Dialect/Mlir/DialectBuilder.hpp) file for the full set of supported operations.
 
 ## Generating Krnl Operations
 
@@ -143,7 +143,7 @@ struct KrnlBuilder : public DialectBuilder {
 
 The first method, `defineLoops` creates a set of loop descriptors that characterizes a loop iteration space. Initially, a set of loop descriptors characterizes the original loop iteration space, shortly, one such modified set can also be used to characterize an optimized iteration spaces, for example to represent a loop tiled iteration space after applying loop blocking and loop permutation.
 
-The second method above, `iterate` is used to create a set of loops and its corresponding loop body. Until we optimize loops, both the `originalLoops` and the `optimizedLoops` are set to the output of a `defineLoops` method call. These sets describe the iteration space and its dimensionality. The next two parameters are used to describe the lower and the upper bounds of the loop. The last parameter defines a lambda function that implements the body of the loop. This labmda function is invoked with two parameters: an object to create further Krnl operations within the loop body and a list of the current loop index values.
+The second method above, `iterate` is used to create a set of loops and its corresponding loop body. Until we optimize loops, both the `originalLoops` and the `optimizedLoops` are set to the output of a `defineLoops` method call. These sets describe the iteration space and its dimensionality. The next two parameters are used to describe the lower and the upper bounds of the loop. The last parameter defines a lambda function that implements the body of the loop. This lambda function is invoked with two parameters: an object to create further Krnl operations within the loop body and a list of the current loop index values.
 
 The usage of this builder will become clearer with our example, setting an array to value zero. This is the same example as in the prior section.
 ``` C++

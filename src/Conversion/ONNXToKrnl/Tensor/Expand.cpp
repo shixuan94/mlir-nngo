@@ -4,7 +4,7 @@
 
 //===----------------Expand.cpp - Lowering Expand Op----------------------=== //
 //
-// Copyright 2020 The IBM Research Authors.
+// Copyright 2020-2022 The IBM Research Authors.
 //
 // =============================================================================
 //
@@ -19,8 +19,9 @@
 using namespace mlir;
 
 struct ONNXExpandOpLowering : public ConversionPattern {
-  ONNXExpandOpLowering(MLIRContext *ctx)
-      : ConversionPattern(mlir::ONNXExpandOp::getOperationName(), 1, ctx) {}
+  ONNXExpandOpLowering(TypeConverter &typeConverter, MLIRContext *ctx)
+      : ConversionPattern(
+            typeConverter, mlir::ONNXExpandOp::getOperationName(), 1, ctx) {}
 
   LogicalResult matchAndRewrite(Operation *op, ArrayRef<Value> operands,
       ConversionPatternRewriter &rewriter) const final {
@@ -44,8 +45,8 @@ struct ONNXExpandOpLowering : public ConversionPattern {
     // Iterate over the output values.
     KrnlBuilder createKrnl(rewriter, loc);
     ValueRange outputLoopDef = createKrnl.defineLoops(outputRank);
-    LiteralIndexExpr zero(0);
-    SmallVector<IndexExpr, 4> lbs(outputRank, zero);
+    LiteralIndexExpr zeroIE(0);
+    SmallVector<IndexExpr, 4> lbs(outputRank, zeroIE);
     createKrnl.iterateIE(outputLoopDef, outputLoopDef, lbs,
         shapeHelper.dimsForOutput(0),
         [&](KrnlBuilder &createKrnl, ValueRange outputLoopInd) {
@@ -64,7 +65,7 @@ struct ONNXExpandOpLowering : public ConversionPattern {
   }
 };
 
-void populateLoweringONNXExpandOpPattern(
-    RewritePatternSet &patterns, MLIRContext *ctx) {
-  patterns.insert<ONNXExpandOpLowering>(ctx);
+void populateLoweringONNXExpandOpPattern(RewritePatternSet &patterns,
+    TypeConverter &typeConverter, MLIRContext *ctx) {
+  patterns.insert<ONNXExpandOpLowering>(typeConverter, ctx);
 }

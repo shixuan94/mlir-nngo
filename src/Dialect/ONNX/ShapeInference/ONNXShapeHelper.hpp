@@ -24,7 +24,7 @@
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LogicalResult.h"
 
-#include "src/Dialect/ONNX/IndexExpr.hpp"
+#include "src/Dialect/Mlir/IndexExpr.hpp"
 #include "src/Dialect/ONNX/ONNXOps.hpp"
 
 using namespace mlir;
@@ -179,6 +179,15 @@ struct ONNXArgMaxOpShapeHelper : public ONNXOpShapeHelper<ONNXArgMaxOp> {
       ArrayValueIndexCapture::GetDenseVal fGetDenseVal,
       ArrayValueIndexCapture::LoadVal fLoadVal);
   LogicalResult computeShape(ONNXArgMaxOpAdaptor operandAdaptor);
+};
+
+// Shape for Clip.
+struct ONNXClipOpShapeHelper : public ONNXOpShapeHelper<ONNXClipOp> {
+  ONNXClipOpShapeHelper(ONNXClipOp *newOp);
+  ONNXClipOpShapeHelper(ONNXClipOp *newOp, OpBuilder *rewriter,
+      ArrayValueIndexCapture::GetDenseVal fGetDenseVal,
+      ArrayValueIndexCapture::LoadVal fLoadVal);
+  LogicalResult computeShape(ONNXClipOpAdaptor operandAdaptor);
 };
 
 // Shape for concat
@@ -388,6 +397,15 @@ struct ONNXAveragePoolOpShapeHelper
   LogicalResult computeShape(ONNXAveragePoolOpAdaptor operandAdaptor);
 };
 
+// Shape for Reduction.
+struct ONNXReduceSumOpShapeHelper : public ONNXOpShapeHelper<ONNXReduceSumOp> {
+  ONNXReduceSumOpShapeHelper(ONNXReduceSumOp *newOp);
+  ONNXReduceSumOpShapeHelper(ONNXReduceSumOp *newOp, OpBuilder *rewriter,
+      ArrayValueIndexCapture::GetDenseVal fGetDenseVal,
+      ArrayValueIndexCapture::LoadVal fLoadVal);
+  LogicalResult computeShape(ONNXReduceSumOpAdaptor operandAdaptor);
+};
+
 // Shape for ReshapeOp.
 struct ONNXReshapeOpShapeHelper : public ONNXOpShapeHelper<ONNXReshapeOp> {
   ONNXReshapeOpShapeHelper(ONNXReshapeOp *newOp);
@@ -524,4 +542,16 @@ struct ONNXCategoryMapperOpShapeHelper
       OpBuilder *rewriter, ArrayValueIndexCapture::GetDenseVal fGetDenseVal,
       ArrayValueIndexCapture::LoadVal fLoadVal);
   LogicalResult computeShape(ONNXCategoryMapperOpAdaptor operandAdaptor);
+};
+
+// Shape for ONNXRoiAlignOp
+struct ONNXRoiAlignOpShapeHelper : public ONNXOpShapeHelper<ONNXRoiAlignOp> {
+  ONNXRoiAlignOpShapeHelper(ONNXRoiAlignOp *newOp);
+  ONNXRoiAlignOpShapeHelper(ONNXRoiAlignOp *newOp, OpBuilder *rewriter,
+      ArrayValueIndexCapture::GetDenseVal fGetDenseVal,
+      ArrayValueIndexCapture::LoadVal fLoadVal);
+  LogicalResult computeShape(ONNXRoiAlignOpAdaptor operandAdaptor);
+  // Additional data for RoiAlignOp.
+  SmallVector<IndexExpr, 4> xDims;            // Dim of X.
+  SmallVector<IndexExpr, 1> batchIndicesDims; // Dim of batch_indices.
 };

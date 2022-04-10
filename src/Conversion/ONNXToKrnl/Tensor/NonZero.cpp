@@ -4,7 +4,7 @@
 
 //===------------------- NonZero.cpp - Lowering NonZero Op ----------------===//
 //
-// Copyright 2019 The IBM Research Authors.
+// Copyright 2019-2022 The IBM Research Authors.
 //
 // =============================================================================
 //
@@ -18,8 +18,9 @@
 using namespace mlir;
 
 struct ONNXNonZeroOpLowering : public ConversionPattern {
-  ONNXNonZeroOpLowering(MLIRContext *ctx)
-      : ConversionPattern(mlir::ONNXNonZeroOp::getOperationName(), 1, ctx) {}
+  ONNXNonZeroOpLowering(TypeConverter &typeConverter, MLIRContext *ctx)
+      : ConversionPattern(
+            typeConverter, mlir::ONNXNonZeroOp::getOperationName(), 1, ctx) {}
 
   /// Given an input of shape (3, 2):
   /// [[2, 1],
@@ -195,7 +196,7 @@ struct ONNXNonZeroOpLowering : public ConversionPattern {
                   Value s = createKrnl.load(sum, {});
                   Value p = createKrnl.load(pos, {});
                   s = createMath.add(s, o);
-                  Value andCond = createMath._and(
+                  Value andCond = createMath.andi(
                       createMath.slt(i, s), createMath.eq(p, iMinusOne));
                   p = createMath.select(andCond, j, p);
                   createKrnl.store(p, pos, {});
@@ -213,7 +214,7 @@ struct ONNXNonZeroOpLowering : public ConversionPattern {
   }
 };
 
-void populateLoweringONNXNonZeroOpPattern(
-    RewritePatternSet &patterns, MLIRContext *ctx) {
-  patterns.insert<ONNXNonZeroOpLowering>(ctx);
+void populateLoweringONNXNonZeroOpPattern(RewritePatternSet &patterns,
+    TypeConverter &typeConverter, MLIRContext *ctx) {
+  patterns.insert<ONNXNonZeroOpLowering>(typeConverter, ctx);
 }

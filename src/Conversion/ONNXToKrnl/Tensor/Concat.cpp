@@ -4,7 +4,7 @@
 
 //===---------------- Concat.cpp - Lowering Concat Op -------------------===//
 //
-// Copyright 2019 The IBM Research Authors.
+// Copyright 2019-2022 The IBM Research Authors.
 //
 // =============================================================================
 //
@@ -18,8 +18,9 @@
 using namespace mlir;
 
 struct ONNXConcatOpLowering : public ConversionPattern {
-  ONNXConcatOpLowering(MLIRContext *ctx)
-      : ConversionPattern(mlir::ONNXConcatOp::getOperationName(), 1, ctx) {}
+  ONNXConcatOpLowering(TypeConverter &typeConverter, MLIRContext *ctx)
+      : ConversionPattern(
+            typeConverter, mlir::ONNXConcatOp::getOperationName(), 1, ctx) {}
 
   LogicalResult matchAndRewrite(Operation *op, ArrayRef<Value> operands,
       ConversionPatternRewriter &rewriter) const final {
@@ -33,7 +34,7 @@ struct ONNXConcatOpLowering : public ConversionPattern {
         loadDenseElementArrayValueAtIndex);
     auto shapecomputed = shapeHelper.computeShape(operandAdaptor);
     (void)shapecomputed;
-    assert(succeeded(shapecomputed));
+    assert(succeeded(shapecomputed) && "Could not compute output shape");
 
     auto axis = concatOp.axis();
     unsigned int inputNum = operands.size();
@@ -45,7 +46,8 @@ struct ONNXConcatOpLowering : public ConversionPattern {
 
     Value alloc = insertAllocAndDeallocSimple(
         rewriter, op, outputMemRefType, loc, shapeHelper.dimsForOutput(0));
-    ;
+
+    MultiDialectBuilder<KrnlBuilder> create(rewriter, loc);
 
     // Creates loops, one for each input.
     for (unsigned int i = 0; i < inputNum; ++i) {
@@ -63,9 +65,9 @@ struct ONNXConcatOpLowering : public ConversionPattern {
       SmallVector<Value, 4> writeIndices;
       for (unsigned int r = 0; r < rank; ++r) {
         readIndices.emplace_back(inputLoops.getInductionVar(r));
-        if (r != axis || i == 0) {
+        if (r != axis || i == 0)
           writeIndices.emplace_back(inputLoops.getInductionVar(r));
-        } else {
+        else {
           IndexExprScope IEScope(&rewriter, loc);
           IndexExpr writeOffset = DimIndexExpr(inputLoops.getInductionVar(r));
           for (unsigned int j = 0; j < i; j++) {
@@ -76,16 +78,15 @@ struct ONNXConcatOpLowering : public ConversionPattern {
         }
       }
       // Insert copy.
-      auto loadData =
-          rewriter.create<KrnlLoadOp>(loc, operands[i], readIndices);
-      rewriter.create<KrnlStoreOp>(loc, loadData, alloc, writeIndices);
+      Value loadData = create.krnl.load(operands[i], readIndices);
+      create.krnl.store(loadData, alloc, writeIndices);
     }
     rewriter.replaceOp(op, alloc);
     return success();
   }
 };
 
-void populateLoweringONNXConcatOpPattern(
-    RewritePatternSet &patterns, MLIRContext *ctx) {
-  patterns.insert<ONNXConcatOpLowering>(ctx);
+void populateLoweringONNXConcatOpPattern(RewritePatternSet &patterns,
+    TypeConverter &typeConverter, MLIRContext *ctx) {
+  patterns.insert<ONNXConcatOpLowering>(typeConverter, ctx);
 }

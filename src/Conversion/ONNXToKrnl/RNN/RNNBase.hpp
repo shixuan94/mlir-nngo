@@ -4,7 +4,7 @@
 
 //===--------------- RNNBase.hpp - Lowering RNN Ops -----------------------===//
 //
-// Copyright 2019 The IBM Research Authors.
+// Copyright 2019-2022 The IBM Research Authors.
 //
 // =============================================================================
 //
@@ -123,8 +123,8 @@ void stateToOutput(ConversionPatternRewriter &rewriter, Location loc, RNNOp *op,
 // A common template for lowering an RNN operation.
 template <typename RNNOp, typename S, typename A, typename W, typename B>
 struct ONNXRNNOpLowering : public ConversionPattern {
-  ONNXRNNOpLowering(MLIRContext *ctx)
-      : ConversionPattern(RNNOp::getOperationName(), 1, ctx) {}
+  ONNXRNNOpLowering(TypeConverter &typeConverter, MLIRContext *ctx)
+      : ConversionPattern(typeConverter, RNNOp::getOperationName(), 1, ctx) {}
 
   LogicalResult matchAndRewrite(Operation *op, ArrayRef<Value> operands,
       ConversionPatternRewriter &rewriter) const final {
@@ -161,14 +161,15 @@ struct ONNXRNNOpLowering : public ConversionPattern {
     int64_t sequenceDimSize = dimAt(rnnOp.X(), 0);
     auto direction = rnnOp.direction();
 
+    MultiDialectBuilder<MemRefBuilder> create(rewriter, loc);
+
     if (direction == FORWARD || direction == BIDIRECTIONAL) {
       BuildKrnlLoop sequenceLoops(rewriter, loc, 1);
       sequenceLoops.createDefineOp();
       if (sequenceDimSize != -1)
         sequenceLoops.pushBounds(0, sequenceDimSize);
       else
-        sequenceLoops.pushBounds(
-            0, rewriter.create<memref::DimOp>(loc, X, 0).getResult());
+        sequenceLoops.pushBounds(0, create.mem.dim(X, 0));
       sequenceLoops.createIterateOp();
 
       auto ipSequenceLoops = rewriter.saveInsertionPoint();
@@ -193,8 +194,7 @@ struct ONNXRNNOpLowering : public ConversionPattern {
       if (sequenceDimSize != -1)
         sequenceLoops.pushBounds(0, sequenceDimSize);
       else
-        sequenceLoops.pushBounds(
-            0, rewriter.create<memref::DimOp>(loc, X, 0).getResult());
+        sequenceLoops.pushBounds(0, create.mem.dim(X, 0));
       sequenceLoops.createIterateOp();
 
       auto ipSequenceLoops = rewriter.saveInsertionPoint();
@@ -210,7 +210,7 @@ struct ONNXRNNOpLowering : public ConversionPattern {
           sequenceSize = emitConstantOp(
               rewriter, loc, rewriter.getIndexType(), sequenceDimSize);
         else
-          sequenceSize = rewriter.create<memref::DimOp>(loc, X, 0).getResult();
+          sequenceSize = create.mem.dim(X, 0);
 
         Value reverseSequenceIV = rewriter.create<AffineApplyOp>(loc,
             reverseIVMap,

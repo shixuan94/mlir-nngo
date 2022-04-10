@@ -380,7 +380,7 @@ def ONNXAveragePoolOp:ONNX_Op<"AveragePool",
       return {20};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXBatchNormalizationOp:ONNX_Op<"BatchNormalization",
@@ -586,6 +586,81 @@ def ONNXClipOp:ONNX_Op<"Clip",
   }];
 }
 
+def ONNXClipV12Op:ONNX_Op<"ClipV12",
+  [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
+  let summary = "ONNX Clip operation";
+  let description = [{
+  "Clip operator limits the given input within an interval. The interval is"
+  "specified by the inputs 'min' and 'max'. They default to"
+  "numeric_limits::lowest() and numeric_limits::max(), respectively."
+  }];
+  let arguments = (ins AnyTypeOf<[TensorOf<[UI8]>, TensorOf<[UI16]>, TensorOf<[UI32]>, TensorOf<[UI64]>, TensorOf<[I8]>, TensorOf<[I16]>, TensorOf<[I32]>, TensorOf<[I64]>, TensorOf<[F16]>, TensorOf<[F32]>, TensorOf<[F64]>, AnyMemRef]>:$input,
+    AnyTypeOf<[TensorOf<[UI8]>, TensorOf<[UI16]>, TensorOf<[UI32]>, TensorOf<[UI64]>, TensorOf<[I8]>, TensorOf<[I16]>, TensorOf<[I32]>, TensorOf<[I64]>, TensorOf<[F16]>, TensorOf<[F32]>, TensorOf<[F64]>, AnyMemRef, NoneType]>:$min,
+    AnyTypeOf<[TensorOf<[UI8]>, TensorOf<[UI16]>, TensorOf<[UI32]>, TensorOf<[UI64]>, TensorOf<[I8]>, TensorOf<[I16]>, TensorOf<[I32]>, TensorOf<[I64]>, TensorOf<[F16]>, TensorOf<[F32]>, TensorOf<[F64]>, AnyMemRef, NoneType, NoneType]>:$max);
+  let results = (outs AnyTypeOf<[TensorOf<[UI8]>, TensorOf<[UI16]>, TensorOf<[UI32]>, TensorOf<[UI64]>, TensorOf<[I8]>, TensorOf<[I16]>, TensorOf<[I32]>, TensorOf<[I64]>, TensorOf<[F16]>, TensorOf<[F32]>, TensorOf<[F64]>, AnyMemRef, NoneType, NoneType]>:$output);
+  let extraClassDeclaration = [{
+    static int getNumberOfOperands() {
+      return 3;
+    }
+    static int getNumberOfResults() {
+      return 1;
+    }
+    static std::vector<int> getTypeMap() {
+      return {20};
+    }
+  }];
+}
+
+def ONNXClipV11Op:ONNX_Op<"ClipV11",
+  [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
+  let summary = "ONNX Clip operation";
+  let description = [{
+  "Clip operator limits the given input within an interval. The interval is"
+  "specified by the inputs 'min' and 'max'. They default to"
+  "numeric_limits::lowest() and numeric_limits::max(), respectively."
+  }];
+  let arguments = (ins AnyTypeOf<[TensorOf<[F16]>, TensorOf<[F32]>, TensorOf<[F64]>, AnyMemRef]>:$input,
+    AnyTypeOf<[TensorOf<[F16]>, TensorOf<[F32]>, TensorOf<[F64]>, AnyMemRef, NoneType]>:$min,
+    AnyTypeOf<[TensorOf<[F16]>, TensorOf<[F32]>, TensorOf<[F64]>, AnyMemRef, NoneType, NoneType]>:$max);
+  let results = (outs AnyTypeOf<[TensorOf<[F16]>, TensorOf<[F32]>, TensorOf<[F64]>, AnyMemRef, NoneType, NoneType]>:$output);
+  let extraClassDeclaration = [{
+    static int getNumberOfOperands() {
+      return 3;
+    }
+    static int getNumberOfResults() {
+      return 1;
+    }
+    static std::vector<int> getTypeMap() {
+      return {20};
+    }
+  }];
+}
+
+def ONNXClipV6Op:ONNX_Op<"ClipV6",
+  [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
+  let summary = "ONNX Clip operation";
+  let description = [{
+  "Clip operator limits the given input within an interval. The interval is"
+  "specified with arguments 'min' and 'max'. They default to"
+  "numeric_limits::lowest() and numeric_limits::max() respectively."
+  }];
+  let arguments = (ins AnyTypeOf<[TensorOf<[F16]>, TensorOf<[F32]>, TensorOf<[F64]>, AnyMemRef]>:$input,
+    DefaultValuedAttr<F32Attr, "(3.402823e+38)">:$max,
+    DefaultValuedAttr<F32Attr, "(-3.402823e+38)">:$min);
+  let results = (outs AnyTypeOf<[TensorOf<[F16]>, TensorOf<[F32]>, TensorOf<[F64]>, AnyMemRef]>:$output);
+  let extraClassDeclaration = [{
+    static int getNumberOfOperands() {
+      return 1;
+    }
+    static int getNumberOfResults() {
+      return 1;
+    }
+    static std::vector<int> getTypeMap() {
+      return {20};
+    }
+  }];
+}
+
 def ONNXCompressOp:ONNX_Op<"Compress",
   [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   let summary = "ONNX Compress operation";
@@ -610,7 +685,7 @@ def ONNXCompressOp:ONNX_Op<"Compress",
       return {20};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXConcatOp:ONNX_Op<"Concat",
@@ -633,6 +708,7 @@ def ONNXConcatOp:ONNX_Op<"Concat",
       return {20};
     }
   }];
+  let hasVerifier = 1;
 }
 
 def ONNXConcatFromSequenceOp:ONNX_Op<"ConcatFromSequence",
@@ -744,6 +820,7 @@ def ONNXConstantOfShapeOp:ONNX_Op<"ConstantOfShape",
       return resultTypes;
     }
   }];
+  let hasVerifier = 1;
 }
 
 def ONNXConvOp:ONNX_Op<"Conv",
@@ -774,7 +851,7 @@ def ONNXConvOp:ONNX_Op<"Conv",
       return {20};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXConvIntegerOp:ONNX_Op<"ConvInteger",
@@ -984,7 +1061,7 @@ def ONNXDepthToSpaceOp:ONNX_Op<"DepthToSpace",
       return {20};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXDequantizeLinearOp:ONNX_Op<"DequantizeLinear",
@@ -1372,7 +1449,7 @@ def ONNXExpandOp:ONNX_Op<"Expand",
       return {20};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXEyeLikeOp:ONNX_Op<"EyeLike",
@@ -1426,6 +1503,7 @@ def ONNXFlattenOp:ONNX_Op<"Flatten",
       return {20};
     }
   }];
+  let hasVerifier = 1;
 }
 
 def ONNXFloorOp:ONNX_Op<"Floor",
@@ -2063,7 +2141,7 @@ def ONNXHardmaxOp:ONNX_Op<"Hardmax",
       return {20};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXIdentityOp:ONNX_Op<"Identity",
@@ -2155,7 +2233,7 @@ def ONNXInstanceNormalizationOp:ONNX_Op<"InstanceNormalization",
       return {20};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXIsInfOp:ONNX_Op<"IsInf",
@@ -3019,7 +3097,7 @@ def ONNXModOp:ONNX_Op<"Mod",
       return {20};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXMulOp:ONNX_Op<"Mul",
@@ -3272,7 +3350,7 @@ def ONNXNonMaxSuppressionOp:ONNX_Op<"NonMaxSuppression",
       return {4};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXNonZeroOp:ONNX_Op<"NonZero",
@@ -3360,7 +3438,7 @@ def ONNXOneHotOp:ONNX_Op<"OneHot",
       return {22};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXOrOp:ONNX_Op<"Or",
@@ -3735,6 +3813,7 @@ def ONNXPowOp:ONNX_Op<"Pow",
         return {20};
       }
     }];
+    let hasVerifier = 1;
 }
 
 def ONNXQLinearConvOp:ONNX_Op<"QLinearConv",
@@ -3993,6 +4072,7 @@ def ONNXRandomNormalLikeOp:ONNX_Op<"RandomNormalLike",
       return {-1};
     }
   }];
+  let hasVerifier = 1;
 }
 
 def ONNXRandomUniformOp:ONNX_Op<"RandomUniform",
@@ -4689,7 +4769,7 @@ def ONNXReverseSequenceOp:ONNX_Op<"ReverseSequence",
       return {20};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXRoiAlignOp:ONNX_Op<"RoiAlign",
@@ -4728,6 +4808,7 @@ def ONNXRoiAlignOp:ONNX_Op<"RoiAlign",
       return {20};
     }
   }];
+  let hasVerifier = 1;
 }
 
 def ONNXRoundOp:ONNX_Op<"Round",
@@ -5067,6 +5148,7 @@ def ONNXScatterElementsOp:ONNX_Op<"ScatterElements",
       return {20};
     }
   }];
+  let hasVerifier = 1;
 }
 
 def ONNXScatterNDOp:ONNX_Op<"ScatterND",
@@ -5145,7 +5227,7 @@ def ONNXScatterNDOp:ONNX_Op<"ScatterND",
       return {20};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXSeluOp:ONNX_Op<"Selu",
@@ -5239,6 +5321,7 @@ def ONNXSequenceEmptyOp:ONNX_Op<"SequenceEmpty",
       return {-1};
     }
   }];
+  let hasVerifier = 1;
 }
 
 def ONNXSequenceEraseOp:ONNX_Op<"SequenceErase",
@@ -5291,7 +5374,7 @@ def ONNXSequenceInsertOp:ONNX_Op<"SequenceInsert",
       return {20};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXSequenceLengthOp:ONNX_Op<"SequenceLength",
@@ -5695,7 +5778,7 @@ def ONNXSpaceToDepthOp:ONNX_Op<"SpaceToDepth",
       return {20};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXSplitOp:ONNX_Op<"Split",
@@ -6181,7 +6264,7 @@ def ONNXTopKOp:ONNX_Op<"TopK",
       return {20,4};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXTransposeOp:ONNX_Op<"Transpose",
@@ -6642,7 +6725,7 @@ def ONNXCategoryMapperOp:ONNX_Op<"CategoryMapper",
       return {-1};
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 }
 
 def ONNXDictVectorizerOp:ONNX_Op<"DictVectorizer",
@@ -6900,6 +6983,7 @@ def ONNXOneHotEncoderOp:ONNX_Op<"OneHotEncoder",
       return {7};
     }
   }];
+  let hasVerifier = 1;
 }
 
 def ONNXSVMClassifierOp:ONNX_Op<"SVMClassifier",

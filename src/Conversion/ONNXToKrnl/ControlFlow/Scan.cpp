@@ -4,7 +4,7 @@
 
 //===-------------------- Scan.cpp - Lowering Scan Op ---------------------===//
 //
-// Copyright 2019 The IBM Research Authors.
+// Copyright 2019-2022 The IBM Research Authors.
 //
 // =============================================================================
 //
@@ -18,8 +18,9 @@
 #include "src/Conversion/ONNXToKrnl/ONNXToKrnlCommon.hpp"
 
 struct ONNXScanOpLowering : public ConversionPattern {
-  explicit ONNXScanOpLowering(MLIRContext *ctx)
-      : ConversionPattern(mlir::ONNXScanOp::getOperationName(), 1, ctx) {}
+  explicit ONNXScanOpLowering(TypeConverter &typeConverter, MLIRContext *ctx)
+      : ConversionPattern(
+            typeConverter, mlir::ONNXScanOp::getOperationName(), 1, ctx) {}
 
   LogicalResult matchAndRewrite(Operation *op, ArrayRef<Value> operands,
       ConversionPatternRewriter &rewriter) const final {
@@ -41,18 +42,21 @@ struct ONNXScanOpLowering : public ConversionPattern {
     // Copy content of vInit to vFinal, which is used to host intermediate
     // values produced by scan body function invocation in a scope accessible by
     // all scan iterations.
-    auto v_initials = llvm::make_range(
-        operands.begin(), operands.end() - scanOp.num_scan_inputs());
+    int64_t numInputs = scanOp.num_scan_inputs();
+    auto v_initials =
+        llvm::make_range(operands.begin(), operands.end() - numInputs);
     for (const auto &vInitAndFinal : llvm::zip(v_initials, outputs))
       emitCopy(rewriter, loc, std::get<0>(vInitAndFinal),
           std::get<1>(vInitAndFinal));
 
+    auto inputOperands = llvm::make_range(
+        operands.begin() + (operands.size() - numInputs), operands.end());
+    MemRefBuilder createMemRef(rewriter, loc);
+    Value maxTripCount = createMemRef.dim(*inputOperands.begin(), 0);
+
     // Create the scan iteration.
     BuildKrnlLoop loop(rewriter, loc, 1);
     loop.createDefineOp();
-    Value maxTripCount =
-        rewriter.create<memref::DimOp>(loc, scanOp.scan_inputs().front(), 0);
-
     loop.pushBounds(0, maxTripCount);
     loop.createIterateOp();
     rewriter.setInsertionPointToStart(loop.getIterateBlock());
@@ -126,12 +130,12 @@ struct ONNXScanOpLowering : public ConversionPattern {
       rewriter.setInsertionPointToStart(postInsertBlock);
 
       // Cast scan body outputs from tensor type to memref type in case it has
-      // not already been lowered via dummy_cast. Eventually, dummy cast becomes
-      // a cast from memref type to a memref type when everything is lowered and
-      // thus becomes redundant.
+      // not already been lowered. Eventually, 'UnrealizedConversionCastOp'
+      // becomes a cast from memref type to a memref type when everything is
+      // lowered and thus becomes redundant.
       SmallVector<Value, 4> bodyOutputs(
           resultsRange.begin(), resultsRange.end());
-      for (unsigned int i = 0; i < bodyOutputs.size(); i++) {
+      for (unsigned i = 0; i < bodyOutputs.size(); i++) {
         auto output = bodyOutputs[i];
         assert((output.getType().isa<TensorType>() ||
                    output.getType().isa<MemRefType>()) &&
@@ -139,10 +143,11 @@ struct ONNXScanOpLowering : public ConversionPattern {
                "tensors/memrefs.");
         auto outputTy = output.getType().cast<ShapedType>();
         bodyOutputs[i] = rewriter
-                             .create<KrnlDummyCastOp>(loc, output,
+                             .create<UnrealizedConversionCastOp>(loc,
                                  MemRefType::get(outputTy.getShape(),
-                                     outputTy.getElementType()))
-                             .getResult();
+                                     outputTy.getElementType()),
+                                 output)
+                             .getResult(0);
       }
 
       // Copy intermediate values of scan carried dependencies to MemRef outside
@@ -276,56 +281,58 @@ struct ONNXScanOpLowering : public ConversionPattern {
   // into a higher dimensional tensor with shape (10x4x2), i.e., a batch of 10
   // tensors, each with shape (4x2). To do so, we can invoke emitCopy(src, dest,
   // {0}).
-  static void emitCopy(ConversionPatternRewriter &rewriter, const Location &loc,
+  static void emitCopy(OpBuilder &builder, const Location &loc,
       const Value &src, const Value &dest,
       std::vector<Value> writePrefix = {}) {
-    OpBuilder::InsertionGuard insertGuard(rewriter);
+    OpBuilder::InsertionGuard insertGuard(builder);
 
     auto srcTy = src.getType().cast<MemRefType>();
     SmallVector<Value, 4> readIV;
     if (srcTy.getRank() > 0) {
-      BuildKrnlLoop loop(rewriter, loc, srcTy.getRank());
+      BuildKrnlLoop loop(builder, loc, srcTy.getRank());
       loop.createDefineOp();
       for (int i = 0; i < srcTy.getRank(); i++)
         loop.pushBounds(0, src, i);
       loop.createIterateOp();
-      rewriter.setInsertionPointToStart(loop.getIterateBlock());
+      builder.setInsertionPointToStart(loop.getIterateBlock());
       auto loopIVs = loop.getAllInductionVar();
       readIV = SmallVector<Value, 4>(loopIVs.begin(), loopIVs.end());
     }
 
     SmallVector<Value, 4> writeIV(writePrefix.begin(), writePrefix.end());
     writeIV.insert(writeIV.end(), readIV.begin(), readIV.end());
-    auto val = rewriter.create<KrnlLoadOp>(loc, src, readIV).getResult();
-    rewriter.create<KrnlStoreOp>(loc, val, dest, writeIV);
+
+    KrnlBuilder createKrnl(builder, loc);
+    Value val = createKrnl.load(src, readIV);
+    createKrnl.store(val, dest, writeIV);
   }
 
-  static void emitCopyFromTensorSlice(ConversionPatternRewriter &rewriter,
-      const Location &loc, const Value &src, const Value &dest,
-      std::vector<Value> readPrefix = {}) {
-    OpBuilder::InsertionGuard insertGuard(rewriter);
+  static void emitCopyFromTensorSlice(OpBuilder &builder, const Location &loc,
+      const Value &src, const Value &dest, std::vector<Value> readPrefix = {}) {
+    OpBuilder::InsertionGuard insertGuard(builder);
 
     auto srcTy = src.getType().cast<MemRefType>();
     SmallVector<Value, 4> readIV(readPrefix.begin(), readPrefix.end());
     SmallVector<Value, 4> writeIV;
     if ((size_t)srcTy.getRank() > readIV.size()) {
-      BuildKrnlLoop loop(rewriter, loc, srcTy.getRank() - readPrefix.size());
+      BuildKrnlLoop loop(builder, loc, srcTy.getRank() - readPrefix.size());
       loop.createDefineOp();
       for (int i = readIV.size(); i < srcTy.getRank(); i++)
         loop.pushBounds(0, src, i);
       loop.createIterateOp();
-      rewriter.setInsertionPointToStart(loop.getIterateBlock());
+      builder.setInsertionPointToStart(loop.getIterateBlock());
       auto IVs = loop.getAllInductionVar();
       writeIV.insert(writeIV.end(), IVs.begin(), IVs.end());
       readIV.insert(readIV.end(), writeIV.begin(), writeIV.end());
     }
 
-    auto val = rewriter.create<KrnlLoadOp>(loc, src, readIV).getResult();
-    rewriter.create<KrnlStoreOp>(loc, val, dest, writeIV);
+    KrnlBuilder createKrnl(builder, loc);
+    Value val = createKrnl.load(src, readIV);
+    createKrnl.store(val, dest, writeIV);
   }
 };
 
-void populateLoweringONNXScanOpPattern(
-    RewritePatternSet &patterns, MLIRContext *ctx) {
-  patterns.insert<ONNXScanOpLowering>(ctx);
+void populateLoweringONNXScanOpPattern(RewritePatternSet &patterns,
+    TypeConverter &typeConverter, MLIRContext *ctx) {
+  patterns.insert<ONNXScanOpLowering>(typeConverter, ctx);
 }

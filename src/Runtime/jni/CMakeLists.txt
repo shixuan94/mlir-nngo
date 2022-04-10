@@ -8,6 +8,11 @@ if (ONNX_MLIR_ENABLE_JNI)
   setup_jsoniter(0.9.23)
 
   # Build javaruntime jar
+  #
+  # javah was deprecated in Java 8 and replaced by javac -h
+  # So now we don't pre-generate the jni header but instead
+  # use the GENERATE_NATIVE_HEADERS option of add_jar, which
+  # requires cmake 3.11+
   add_jar(javaruntime
     src/com/ibm/onnxmlir/OMModel.java
     src/com/ibm/onnxmlir/OMLogger.java
@@ -16,6 +21,7 @@ if (ONNX_MLIR_ENABLE_JNI)
     src/com/ibm/onnxmlir/OMTensor.java
 
     INCLUDE_JARS ${JSONITER_JAR}
+    GENERATE_NATIVE_HEADERS jniruntime_header
     )
   if (TARGET jsoniter)
     add_dependencies(javaruntime jsoniter)
@@ -27,11 +33,15 @@ if (ONNX_MLIR_ENABLE_JNI)
   # in the default location and copy it to the library path after it is built.
   #
   # Note target must be ${ONNX_MLIR_LIBRARY_PATH}/javaruntime.jar instead of
-  # just ${ONNX_MLIR_LIBRARY_PATH} for Windows CI.
-  add_custom_command(TARGET javaruntime POST_BUILD
+  # just ${ONNX_MLIR_LIBRARY_PATH} for Windows - otherwise, if the directory
+  # ${ONNX_MLIR_LIBRARY_PATH} has not yet been created, it will be treated as
+  # the name of the file.
+  add_custom_command(
+    TARGET javaruntime
+    POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_PROPERTY:javaruntime,JAR_FILE>
-            ${ONNX_MLIR_LIBRARY_PATH}/javaruntime.jar)
+            $<TARGET_PROPERTY:javaruntime,JAR_FILE> ${ONNX_MLIR_LIBRARY_PATH}/javaruntime.jar
+    )
 
   # Build jniruntime lib
   add_onnx_mlir_library(jniruntime STATIC
@@ -46,6 +56,8 @@ if (ONNX_MLIR_ENABLE_JNI)
     ${JAVA_INCLUDE_PATH}
     ${JAVA_INCLUDE_PATH2}
     )
+  # jniruntime_header is an INTERFACE target, a header-only "library"
+  target_link_libraries(jniruntime PRIVATE jniruntime_header)
 
   set_target_properties(jniruntime
     PROPERTIES

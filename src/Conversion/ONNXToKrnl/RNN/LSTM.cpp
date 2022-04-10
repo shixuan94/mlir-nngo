@@ -4,7 +4,7 @@
 
 //===--------------- LSTM.cpp - Lowering LSTM Op --------------------------===//
 //
-// Copyright 2019 The IBM Research Authors.
+// Copyright 2019-2022 The IBM Research Authors.
 //
 // =============================================================================
 //
@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "src/Conversion/ONNXToKrnl/RNN/RNNBase.hpp"
-#include "src/Dialect/ONNX/MLIRDialectBuilder.hpp"
+#include "src/Dialect/Mlir/DialectBuilder.hpp"
 
 using namespace mlir;
 
@@ -609,8 +609,8 @@ void stateToOutput<ONNXLSTMOp, LstmState>(ConversionPatternRewriter &rewriter,
   }
 }
 
-void populateLoweringONNXLSTMOpPattern(
-    OwningRewritePatternList &patterns, MLIRContext *ctx) {
+void populateLoweringONNXLSTMOpPattern(RewritePatternSet &patterns,
+    TypeConverter &typeConverter, MLIRContext *ctx) {
   patterns.insert<ONNXRNNOpLowering<ONNXLSTMOp, LstmState, LstmActivationPack,
-      LstmWeightPack, LstmBiasPack>>(ctx);
+      LstmWeightPack, LstmBiasPack>>(typeConverter, ctx);
 }

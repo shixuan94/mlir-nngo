@@ -4,7 +4,7 @@
 
 //===----------- RandomNormal.cpp - Lowering RandomNormal Op --------------===//
 //
-// Copyright 2019-2021 The IBM Research Authors.
+// Copyright 2019-2022 The IBM Research Authors.
 //
 // =============================================================================
 //
@@ -14,8 +14,8 @@
 
 #include "src/Conversion/ONNXToKrnl/ONNXToKrnlCommon.hpp"
 #include "src/Dialect/Krnl/KrnlHelper.hpp"
-#include "src/Dialect/ONNX/IndexExpr.hpp"
-#include "src/Dialect/ONNX/MLIRDialectBuilder.hpp"
+#include "src/Dialect/Mlir/DialectBuilder.hpp"
+#include "src/Dialect/Mlir/IndexExpr.hpp"
 #include "src/Dialect/ONNX/ShapeInference/ONNXShapeHelper.hpp"
 
 #include <ctime>
@@ -23,15 +23,15 @@
 using namespace mlir;
 
 struct ONNXRandomNormalOpLowering : public ConversionPattern {
-  ONNXRandomNormalOpLowering(MLIRContext *ctx)
-      : ConversionPattern(
+  ONNXRandomNormalOpLowering(TypeConverter &typeConverter, MLIRContext *ctx)
+      : ConversionPattern(typeConverter,
             mlir::ONNXRandomNormalOp::getOperationName(), 1, ctx) {}
   LogicalResult matchAndRewrite(Operation *op, ArrayRef<Value> operands,
       ConversionPatternRewriter &rewriter) const final {
     Location loc = op->getLoc();
     MemRefType outputMemRefType = convertToMemRefType(*op->result_type_begin());
     ArrayRef<int64_t> outputMemRefShape = outputMemRefType.getShape();
-    int outputRank = outputMemRefShape.size();
+    size_t outputRank = outputMemRefShape.size();
     Type elementType = outputMemRefType.getElementType();
 
     // Insert alloc/dealloc pair for output tensor.
@@ -58,15 +58,17 @@ struct ONNXRandomNormalOpLowering : public ConversionPattern {
     if (seed)
       doubleSeed = seed->convertToDouble();
     Value seedValue = emitConstantOp(rewriter, loc, elementType, doubleSeed);
-    rewriter.create<KrnlRandomNormalOp>(
-        loc, alloc, numberOfRandomValues, meanValue, scaleValue, seedValue);
+
+    MultiDialectBuilder<KrnlBuilder> create(rewriter, loc);
+    create.krnl.randomNormal(
+        alloc, numberOfRandomValues, meanValue, scaleValue, seedValue);
 
     rewriter.replaceOp(op, alloc);
     return success();
   }
 };
 
-void populateLoweringONNXRandomNormalOpPattern(
-    RewritePatternSet &patterns, MLIRContext *ctx) {
-  patterns.insert<ONNXRandomNormalOpLowering>(ctx);
+void populateLoweringONNXRandomNormalOpPattern(RewritePatternSet &patterns,
+    TypeConverter &typeConverter, MLIRContext *ctx) {
+  patterns.insert<ONNXRandomNormalOpLowering>(typeConverter, ctx);
 }
