@@ -49,3 +49,7 @@ llvm::cl::opt<std::string> acceleratorTarget("accel",
 llvm::cl::opt<bool> enableGPU("enable-gpu",
     llvm::cl::desc("lowering to gpu"),
     llvm::cl::init(false), llvm::cl::cat(OMPassOptions));
+
+llvm::cl::opt<bool> dbgFinalPass("debug-final-pass",
+    llvm::cl::desc("debug for final pass"),
+    llvm::cl::init(false), llvm::cl::cat(OMPassOptions));

@@ -26,3 +26,4 @@ extern llvm::cl::opt<int> onnxOpTransformThreshold;
 extern llvm::cl::opt<bool> onnxOpTransformReport;
 extern llvm::cl::opt<std::string> acceleratorTarget;
 extern llvm::cl::opt<bool> enableGPU;
+extern llvm::cl::opt<bool> dbgFinalPass;

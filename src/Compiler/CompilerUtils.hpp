@@ -36,6 +36,7 @@ extern const std::string OnnxMlirEnvOptionName;
 extern llvm::cl::OptionCategory OnnxMlirOptions;
 extern llvm::cl::opt<std::string> instrumentONNXOps;
 extern llvm::cl::opt<bool> enableGPU;
+extern llvm::cl::opt<bool> dbgFinalPass;
 
 // Options support for OMCompilerOptions.
 using CompilerOptionList =

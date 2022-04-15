@@ -727,6 +727,8 @@ void registerDialects(mlir::MLIRContext &context) {
   context.getOrLoadDialect<mlir::memref::MemRefDialect>();
   context.getOrLoadDialect<mlir::ONNXDialect>();
   context.getOrLoadDialect<mlir::KrnlOpsDialect>();
+  context.getOrLoadDialect<mlir::gpu::GPUDialect>();
+  context.getOrLoadDialect<mlir::NVVM::NVVMDialect>();
 }
 
 void addONNXToMLIRPasses(mlir::PassManager &pm) {
@@ -790,10 +792,11 @@ void addAffineToGPUPasses(mlir::PassManager &pm) {
   pm.addPass(mlir::createLowerGpuOpsToNVVMOpsPass());
 
 
-  // registerGpuSerializeToCubinPass();
+  registerGpuSerializeToCubinPass();
 
-
-  pm.addPass(mlir::createGpuToLLVMConversionPass());
+  if (dbgFinalPass) {
+    pm.addPass(mlir::createGpuToLLVMConversionPass());
+  }
 }
 
 void addKrnlToLLVMPasses(mlir::OpPassManager &pm) {
