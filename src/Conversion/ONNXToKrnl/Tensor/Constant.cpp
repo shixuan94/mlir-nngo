@@ -47,3 +47,40 @@ void populateLoweringONNXConstantOpPattern(RewritePatternSet &patterns,
     TypeConverter &typeConverter, MLIRContext *ctx) {
   patterns.insert<ONNXConstantOpLowering>(typeConverter, ctx);
 }
+
+
+// lijx
+// convert onnx.constant to memref.global and memref.get_global
+// struct ONNXConstantOpToMemLowering : public ConversionPattern {
+//   ONNXConstantOpToMemLowering(TypeConverter &typeConverter, MLIRContext *ctx)
+//       : ConversionPattern(
+//             typeConverter, mlir::ONNXConstantOp::getOperationName(), 1, ctx) {}
+
+//   LogicalResult matchAndRewrite(Operation *op, ArrayRef<Value> operands,
+//       ConversionPatternRewriter &rewriter) const final {
+//     Location loc = ONNXLoc<ONNXConstantOp>(op);
+//     auto constantOp = cast<ONNXConstantOp>(op);
+
+//     if (constantOp.sparse_value().hasValue())
+//       return emitError(loc, "Only support dense values at this time");
+
+//     MemRefType memRefType = convertToMemRefType(*op->result_type_begin());
+
+
+
+//     // find the moduleOp, insert memref.global in it 
+//     ModuleOp topModule = op.getParentOfType<ModuleOp>();
+//     OpBuilder builder(ctx,&topModule.getRegion(0));
+//     // how to name a globalOp?
+
+//     builder.create<memref::GlobalOp>('x',memRefType,constantOp.value().getValue());
+//     // replace onnx.constant with memref.get_global
+//     builder.setInsertionPoint(op);
+//     builder.create<memref::GetGlobalOp>('x');
+//     rewriter.eraseOp(op);
+    
+
+
+//     return success();
+//   }
+// };

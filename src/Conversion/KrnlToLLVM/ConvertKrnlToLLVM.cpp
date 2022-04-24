@@ -584,5 +584,104 @@ void populateKrnlToLLVMConversion(LLVMTypeConverter &typeConverter,
   krnl::populateLoweringKrnlStrncmpOpPattern(typeConverter, patterns, ctx);
 }
 
+
+
+//lijx
+// only lower krnl.global
+// struct ConvertKrnlToLLVMPartPass
+//     : public PassWrapper<ConvertKrnlToLLVMPartPass, OperationPass<ModuleOp>> {
+
+//   StringRef getArgument() const override { return "convert-krnl.global-to-llvm.global"; }
+
+//   StringRef getDescription() const override {
+//     return "Lower krnl.global to llvm.global.";
+//   }
+
+//   void runOnOperation() final;
+// };
+
+// void ConvertKrnlToLLVMPartPass::runOnOperation() {
+//   ModuleOp module = getOperation();
+//   MLIRContext *ctx = &getContext();
+//   const auto &dataLayoutAnalysis = getAnalysis<DataLayoutAnalysis>();
+//   LowerToLLVMOptions options(ctx, dataLayoutAnalysis.getAtOrAbove(module));
+//   options.emitCWrappers = true;
+
+//   // Determine whether an output OMTensor should own the underlying buffer or
+//   // not.
+//   SmallVector<bool, 4> outputOMTensorOwnerships;
+//   determineOwnershipForOutputOMTensors(module, outputOMTensorOwnerships);
+
+//   // Record entry point names and their input/output signatures.
+//   // This info is used to generate global signature functions.
+//   SmallVector<std::string, 1> entryPointNames, inSignatures, outSignatures;
+//   recordEntryPointSignatures(
+//       module, entryPointNames, inSignatures, outSignatures);
+
+//   // Define the target for this lowering i.e. the LLVM dialect.
+//   ConversionTarget target(*ctx);
+//   // lijx 
+//   // target.addLegalDialect<LLVM::LLVMDialect>();
+//   // target.addLegalOp<ModuleOp>();
+//   // target.addLegalOp<UnrealizedConversionCastOp>();
+//   target.addLegalDialect<LLVM::LLVMDialect>();
+//   target.addIllegalOp<KrnlGlobalOp>();
+
+//   // Convert types to legal types for the LLVM dialect.
+//   LLVMTypeConverter typeConverter(ctx, options);
+//   customizeTypeConverter(typeConverter);
+
+// #if 0
+//   typeConverter.addConversion([&](MemRefType type) -> llvm::Optional<Type> {
+//     Type elementType = type.getElementType();
+//     if (!elementType.isa<StringType>())
+//       return llvm::None;
+
+//     elementType = elementType.cast<StringType>().getLLVMType(type.getContext());
+//     return typeConverter.convertType(
+//         MemRefType::get(type.getShape(), elementType));
+//   });
+
+//   typeConverter.addConversion([&](StringType type) -> Type {
+//     return typeConverter.convertType(type.getLLVMType(type.getContext()));
+//   });
+// #endif
+
+//   // We have a combination of `krnl`, `affine`, `vector`, and `std` operations.
+//   // We lower in stages until all the code is in the LLVM dialect.
+//   RewritePatternSet patterns(ctx);
+
+//   populateAffineAndKrnlToLLVMPartConversion(patterns, typeConverter, ctx,
+//       outputOMTensorOwnerships,
+//       /*singleEntryPoint=*/entryPointNames.size() == 1);
+
+//   // We want to completely lower to LLVM, so we use a `FullConversion`. This
+//   // ensures that only legal operations will remain after the conversion.
+//   if (failed(
+//           applyFullConversion(getOperation(), target, std::move(patterns)))) {
+//     signalPassFailure();
+//   }
+
+//   // Generate signature functions.
+//   if (entryPointNames.size() >= 1)
+//     genSignatureFunction(module, entryPointNames, inSignatures, outSignatures);
+// }
+
+
+// lijx
+// only lower krnl.global
+// void populateKrnlToLLVMPartConversion(LLVMTypeConverter &typeConverter,
+//     RewritePatternSet &patterns, MLIRContext *ctx,
+//     ArrayRef<bool> outputOMTensorOwnerships, bool singleEntryPoint) {
+  
+//   krnl::populateLoweringKrnlGlobalOpPattern(typeConverter, patterns, ctx);
+  
+// }
+// lijx
+// only lower krnl.global
+// std::unique_ptr<Pass> createConvertKrnlToLLVMPartPass() {
+//   return std::make_unique<ConvertKrnlToLLVMPartPass>();
+// }
+
 } // namespace krnl
 } // namespace onnx_mlir

@@ -10,6 +10,8 @@ add_onnx_mlir_library(OMKrnlToAffine
   KrnlStore.cpp
   KrnlTerminator.cpp
   KrnlToAffineHelper.cpp
+  # lijx
+  KrnlGlobal.cpp
 
   LINK_LIBS PUBLIC
   OMSpecializedKernelOpInterface
