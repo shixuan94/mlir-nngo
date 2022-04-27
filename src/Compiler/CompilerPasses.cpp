@@ -83,6 +83,7 @@ void addONNXToKrnlPasses(mlir::PassManager &pm, int optLevel) {
 
 void addKrnlToAffinePasses(mlir::PassManager &pm) {
   pm.addNestedPass<FuncOp>(onnx_mlir::krnl::createConvertKrnlToAffinePass());
+  
 }
 
 void addKrnlToLLVMPasses(mlir::OpPassManager &pm) {
@@ -147,6 +148,8 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
       addONNXToKrnlPasses(pm, OptimizationLevel);
     if (inputIRLevel <= MLIRLevel)
       addKrnlToAffinePasses(pm);
+     
+      
   }
 
   if (inputIRLevel <= LLVMLevel && emissionTarget >= EmitLLVMIR)
