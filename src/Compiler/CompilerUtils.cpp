@@ -17,7 +17,7 @@
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Dialect/GPU/Passes.h"
 #include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"
-// #include "src/Conversion/SerializeToCubin/SerializeToCubin.hpp"
+#include "src/Conversion/SerializeToCubin/SerializeToCubin.hpp"
 
 
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
@@ -791,10 +791,8 @@ void addAffineToGPUPasses(mlir::PassManager &pm) {
   pm.addPass(mlir::createGpuKernelOutliningPass());
   pm.addPass(mlir::createLowerGpuOpsToNVVMOpsPass());
 
-
-  registerGpuSerializeToCubinPass();
-
   if (dbgFinalPass) {
+    pm.addPass(mlir::createSerializeToCubin());
     pm.addPass(mlir::createGpuToLLVMConversionPass());
   }
 }

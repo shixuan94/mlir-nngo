@@ -1,11 +1,15 @@
-//===- TestConvertGPUKernelToCubin.cpp - Test gpu kernel cubin lowering ---===//
+//===- LowerGPUToCUBIN.cpp - Convert GPU kernel to CUBIN blob -------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-
+//
+// This file implements a pass that serializes a gpu module into CUBIN blob and
+// adds that blob as a string attribute of the module.
+//
+//===----------------------------------------------------------------------===//
 #include "mlir/Dialect/GPU/Passes.h"
 
 #include "mlir/Pass/Pass.h"
@@ -13,17 +17,39 @@
 #include "mlir/Target/LLVMIR/Export.h"
 #include "llvm/Support/TargetSelect.h"
 
+#include <cuda.h>
+
 using namespace mlir;
 
+static void emitCudaError(const llvm::Twine &expr, const char *buffer,
+                          CUresult result, Location loc) {
+  const char *error;
+  cuGetErrorString(result, &error);
+  emitError(loc, expr.concat(" failed with error code ")
+                     .concat(llvm::Twine{error})
+                     .concat("[")
+                     .concat(buffer)
+                     .concat("]"));
+}
+
+#define RETURN_ON_CUDA_ERROR(expr)                                             \
+  do {                                                                         \
+    if (auto status = (expr)) {                                                \
+      emitCudaError(#expr, jitErrorBuffer, status, loc);                       \
+      return {};                                                               \
+    }                                                                          \
+  } while (false)
+
 namespace {
-class TestSerializeToCubinPass
-    : public PassWrapper<TestSerializeToCubinPass, gpu::SerializeToBlobPass> {
+class SerializeToCubinPass
+    : public PassWrapper<SerializeToCubinPass, gpu::SerializeToBlobPass> {
 public:
-  StringRef getArgument() const final { return "test-gpu-to-cubin"; }
-  StringRef getDescription() const final {
+  SerializeToCubinPass();
+
+  StringRef getArgument() const override { return "gpu-to-cubin"; }
+  StringRef getDescription() const override {
     return "Lower GPU kernel function to CUBIN binary annotations";
   }
-  TestSerializeToCubinPass();
 
 private:
   void getDependentDialects(DialectRegistry &registry) const override;
@@ -34,23 +60,88 @@ private:
 };
 } // namespace
 
-TestSerializeToCubinPass::TestSerializeToCubinPass() {
-  this->triple = "nvptx64-nvidia-cuda";
-  this->chip = "sm_35";
-  this->features = "+ptx60";
+// Sets the 'option' to 'value' unless it already has a value.
+static void maybeSetOption(Pass::Option<std::string> &option,
+                           const char *value) {
+  if (!option.hasValue())
+    option = value;
 }
 
-void TestSerializeToCubinPass::getDependentDialects(
+SerializeToCubinPass::SerializeToCubinPass() {
+  maybeSetOption(this->triple, "nvptx64-nvidia-cuda");
+  maybeSetOption(this->chip, "sm_35");
+  // maybeSetOption(this->features, "+ptx60");
+  maybeSetOption(this->features, "+ptx75");
+}
+
+void SerializeToCubinPass::getDependentDialects(
     DialectRegistry &registry) const {
   registerNVVMDialectTranslation(registry);
   gpu::SerializeToBlobPass::getDependentDialects(registry);
 }
 
 std::unique_ptr<std::vector<char>>
-TestSerializeToCubinPass::serializeISA(const std::string &) {
-  std::string data = "CUBIN";
-  return std::make_unique<std::vector<char>>(data.begin(), data.end());
+SerializeToCubinPass::serializeISA(const std::string &isa) {
+  Location loc = getOperation().getLoc();
+  char jitErrorBuffer[4096] = {0};
+
+  RETURN_ON_CUDA_ERROR(cuInit(0));
+
+  // Linking requires a device context.
+  CUdevice device;
+  RETURN_ON_CUDA_ERROR(cuDeviceGet(&device, 0));
+  CUcontext context;
+  RETURN_ON_CUDA_ERROR(cuCtxCreate(&context, 0, device));
+  CUlinkState linkState;
+
+  CUjit_option jitOptions[] = {CU_JIT_ERROR_LOG_BUFFER,
+                               CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES};
+  void *jitOptionsVals[] = {jitErrorBuffer,
+                            reinterpret_cast<void *>(sizeof(jitErrorBuffer))};
+
+  RETURN_ON_CUDA_ERROR(cuLinkCreate(2,              /* number of jit options */
+                                    jitOptions,     /* jit options */
+                                    jitOptionsVals, /* jit option values */
+                                    &linkState));
+
+  auto kernelName = getOperation().getName().str();
+  RETURN_ON_CUDA_ERROR(cuLinkAddData(
+      linkState, CUjitInputType::CU_JIT_INPUT_PTX,
+      const_cast<void *>(static_cast<const void *>(isa.c_str())), isa.length(),
+      kernelName.c_str(), 0, /* number of jit options */
+      nullptr,               /* jit options */
+      nullptr                /* jit option values */
+      ));
+
+  void *cubinData;
+  size_t cubinSize;
+  RETURN_ON_CUDA_ERROR(cuLinkComplete(linkState, &cubinData, &cubinSize));
+
+  char *cubinAsChar = static_cast<char *>(cubinData);
+  auto result =
+      std::make_unique<std::vector<char>>(cubinAsChar, cubinAsChar + cubinSize);
+
+  // This will also destroy the cubin data.
+  RETURN_ON_CUDA_ERROR(cuLinkDestroy(linkState));
+  RETURN_ON_CUDA_ERROR(cuCtxDestroy(context));
+
+  return result;
 }
+
+// Register pass to serialize GPU kernel functions to a CUBIN binary annotation.
+void mlir::registerGpuSerializeToCubinPass() {
+  PassRegistration<SerializeToCubinPass> registerSerializeToCubin(
+      [] {
+        // Initialize LLVM NVPTX backend.
+        LLVMInitializeNVPTXTarget();
+        LLVMInitializeNVPTXTargetInfo();
+        LLVMInitializeNVPTXTargetMC();
+        LLVMInitializeNVPTXAsmPrinter();
+
+        return std::make_unique<SerializeToCubinPass>();
+      });
+}
+
 
 namespace mlir {
 
@@ -59,6 +150,6 @@ std::unique_ptr<Pass> createSerializeToCubin() {
   LLVMInitializeNVPTXTargetInfo();
   LLVMInitializeNVPTXTargetMC();
   LLVMInitializeNVPTXAsmPrinter();
-  return std::make_unique<TestSerializeToCubinPass>();
+  return std::make_unique<SerializeToCubinPass>();
 }
 } // namespace mlir
